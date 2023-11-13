@@ -1,0 +1,52 @@
+<mxfile host="app.diagrams.net" modified="2023-11-13T08:46:57.323Z" agent="Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0" etag="YH7pxg3YqVXXBAqNoluU" version="21.6.8" type="device">
+  <diagram name="第 1 页" id="wVoPm5zeVpkXzsW5aRNO">
+    <mxGraphModel dx="794" dy="464" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="90" y="190" width="460" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-2" value="存放&lt;b&gt;对象本身&lt;/b&gt;以及&lt;b&gt;数组（数组也是对象）&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="250" y="223" width="120" height="77" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-4" value="静态的数据变量（static）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="250" y="310" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-8" value="Java内存" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="110" y="190" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-9" value="存放&lt;b&gt;基本数据类型&lt;br&gt;&lt;/b&gt;和&lt;br&gt;&lt;b&gt;对象的引用&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="110" y="223" width="110" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-10" value="&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;1、常量值（final）；&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;2、五种范围在&lt;/span&gt;-128到127之间的包装类以及Boolean，两个浮点型除外；&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;3、String s =&quot;str&quot;; 创建的对象&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;4、其他文本符号引用&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=21;fillColor=#f8cecc;strokeColor=#b85450;gradientColor=#ea6b66;" vertex="1" parent="1">
+          <mxGeometry x="395" y="221" width="135" height="239" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-11" value="栈" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="135" y="221" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-12" value="堆" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="280" y="223" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-13" value="静态域" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="275" y="310" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-14" value="常量池" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="420" y="221" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-15" value="编译器自动分配" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="250" y="390" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-16" value="寄存器" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="275" y="390" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-27" value="硬盘等永久存储空间" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;" vertex="1" parent="1">
+          <mxGeometry x="110" y="350" width="110" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="O4_iynZGrdl7oOBD3pu5-28" value="非RAM存储" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="135" y="350" width="65" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
