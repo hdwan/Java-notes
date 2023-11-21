@@ -948,3 +948,318 @@ public class BookServiceImpl implements BookService {
 
 ### IoC源码理解
 
+## IOC/DI配置管理第三方bean
+
+管理第三方jar包中的类：Druid(德鲁伊)、C3P0。
+
+前置配置：
+
+1. 添加spring依赖：
+
+    ```xml
+    <dependencies>
+    	<dependency>
+    		<groupId>org.springframework</groupId>
+    		<artifactId>spring-context</artifactId>
+    		<version>5.2.10.RELEASE</version>
+    	</dependency>
+    </dependencies>
+    ```
+
+2. resources下添加spring的配置文件applicationContext.xml。
+
+3. 创建运行类application。
+
+### 管理Druid（德鲁伊）
+
+管理第三方类：`DruidDataSource`。
+
+分四步：
+
+1. Druid是第三方技术，需要在`pom.xml`中添加依赖；
+2. 将第三方类关联到bean进行管理；
+3. 在bean中配置数据库连接的四要素：驱动、链接、用户名、密码；
+4. 在运行类中获取bean对象；
+
+安装依赖：
+
+```xml
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid</artifactId>
+            <version>1.1.13</version>
+        </dependency>
+```
+
+配置spring：
+
+```xml
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"></property>
+        <property name="url" value="root"></property>
+        <property name="username" value="root"></property>
+        <property name="password" value="root"></property>
+    </bean>
+```
+
+属性说明：
+
+`driverClassName`：数据库驱动；
+
+`url`：数据库连接地址；
+
+`username`：用户名；
+
+`password`：密码；
+
+获取`bean`：
+
+```java
+        ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext("applicationContext.xml");
+        DataSource dataSource = (DataSource) context.getBean("dataSource");
+        System.out.println(dataSource);
+```
+
+### 管理c3p0
+
+添加依赖：
+
+```xml
+    <dependency>
+        <groupId>c3p0</groupId>
+        <artifactId>c3p0</artifactId>
+        <version>0.9.1.2</version>
+	</dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>5.1.47</version>
+        </dependency>
+```
+
+注意管理的时候必须导入mysql依赖，因为c3p0初始化的时候会加载该依赖，Druid则不会。
+
+配置spring文件：
+
+```xml
+    <bean id="dataSource" class="com.mchange.v2.c3p0.ComboPooledDataSource">
+        <property name="driverClass" value="com.mysql.jdbc.Driver"></property>
+        <property name="jdbcUrl" value="jdbc:mysql://localhost:3306/spring_db"></property>
+        <property name="user" value="root"></property>
+        <property name="password" value="000000"></property>
+        <property name="maxPoolSize" value="1000"></property>
+    </bean>
+```
+
+从bean可以看出第三方类是`ComboPooledDataSource`，通过setter方法注入。
+
+### 使用properties文件
+
+将数据库信息放在spring配置文件不方便管理，解决办法：提取到外部`properties`文件。
+
+**思路**：将数据库连接四要素**提取到properties配置文件**，**spring来加载配置信息**并使用这些信息 来完成属性注入。
+
+1. 在resources下创建一个.properties文件；
+2. 将数据库连接四要素配置到配置文件中；
+3. 在Spring的配置文件中加载properties文件；
+4. 使用加载到的值实现属性注入；
+
+**properties配置文件：**
+
+```properties
+jdbc.driver=com.mysql.jdbc.Driver
+jdbc.url=jdbc:mysql://127.0.0.1:3306/spring_db
+jdbc.username=root
+jdbc.password=root
+```
+
+**配置spring文件：**
+
+在applicationContext.xml中开context命名空间
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="
+       http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/context
+       http://www.springframework.org/schema/context/spring-context.xsd">
+    
+</beans>
+```
+
+命名空间打开方式：
+
+![image-20231121202109033](typora文档图片/image-20231121202109033.png)
+
+**加载properties文件**
+
+在配置文件中使用context命名空间下的标签来加载properties配置文件：
+
+```xml
+ <context:property-placeholder location="jdbc.properties"/>
+```
+
+location值为properties配置文件名。
+
+**完成属性注入**
+
+使用**${key}**来读取properties配置文件中的内容并完成属性注入。
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="
+       http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/context
+       http://www.springframework.org/schema/context/spring-context.xsd">
+    <!--加载properties文件--> 
+        <context:property-placeholder location="application.properties"/>
+    <!--读取配置文件内容 -->
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">
+        <property name="driverClassName" value="${jdbc.driver}"/>
+        <property name="url" value="${jdbc.url}"></property>
+        <property name="username" value="${jdbc.username}"></property>
+        <property name="password" value="${jdbc.password}"></property>
+    </bean>
+```
+
+注意这里name属性必须对应类里面的属性名，并实现setter方法。
+
+**注意事项**：
+
+1、键值对的key为username引发的问题：
+
+在properties文件中配置键值对的时候，如果key设置为username：`username=11111`
+
+spring配置文件：
+
+```xml
+<property name="username" value="${username}"></property>
+```
+
+此时读取到的是 `Administrator`，即电脑的用户名。
+
+出现问题的原因是`<context:property-placeholder/>`标签**会优先加载系统的环境变量**。
+
+解决办法：
+
+```xml
+<context:property-placeholder location="jdbc.properties" system-properties-mode="NEVER"/>
+```
+
+`system-properties-mode`:设置为`NEVER`,表示不加载系统属性，就可以解决上述问题。
+
+或者使用上面的数据库文件的格式，加个额外的jdbc.username，或者直接不适用username。
+
+2、如何加载多个properties配置文件
+
+```xml
+<!--方式一-->
+<context:property-placeholder location="jdbc.properties,jdbc2.properties" system-properties-mode="NEVER"/>
+<!--方式二-->
+<context:property-placeholder location="*.properties" system-properties-mode="NEVER"/>
+<!--方式三 -->
+<context:property-placeholder location="classpath:*.properties"
+system-properties-mode="NEVER"/>
+<!--方式四-->
+<context:property-placeholder location="classpath*:*.properties"
+system-properties-mode="NEVER"/>
+</beans>
+```
+
+方式一:可以实现，如果配置文件多的话，每个都需要配置；
+
+方式二: *.properties代表**所有以properties结尾**的文件都会被加载，可以解决方式一的问题，但是不标准；
+
+方式三:标准的写法，classpath:代表的是**从根路径**下开始查找，但是**只能查询当前项目**的根路径； 
+
+方式四:不仅可以加载当前项目还可以加载当前项目所依赖的**所有项目的根路径下**的properties配置文件；
+
+## 核心容器
+
+详细分析IoC容器。
+
+### 容器创建
+
+与上面一样：
+
+```java
+ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext("applicationContext.xml");
+```
+
+即：**类路径下的XML配置文件**（推荐）。
+
+使用电脑文件路径：
+
+```java
+FileSystemXmlApplicationContext ctx = new FileSystemXmlApplicationContext("F:/java/datasource/src/main/resources/applicationContext.xml");
+// "F:\\java\\datasource\\src\\main\\resources\\applicationContext.xml"
+```
+
+即：**:文件系统下的XML配置文件**。
+
+### 获取bean
+
+方式一：
+
+```java
+BookDao bookDao = (BookDao) ctx.getBean("bookDao");
+```
+
+缺点：需要进行强制类型转换。
+
+方式二：
+
+BookDao bookDao = ctx.getBean("bookDao"，BookDao.class);
+
+不需要转换，但是多了个参数。
+
+方式三：
+
+```java
+BookDao bookDao = ctx.getBean(BookDao.class);
+```
+
+注意：必须确保spring配置文件中该类型的类对应的bean只有一个（因为它是根据类获取，不是根据bean的id获取）。
+
+### 容器类层次结构
+
+![image-20231121214555708](typora文档图片/image-20231121214555708.png)
+
+### BeanFactory的使用
+
+使用BeanFactory来创建IoC容器：
+
+```java
+
+```
+
+## 汇总
+
+#### 容器相关
+
+- BeanFactory是IoC容器的顶层接口，初始化BeanFactory对象时，加载的bean延迟加载
+- ApplicationContext接口是Spring容器的核心接口，初始化时bean立即加载
+- ApplicationContext接口提供基础的bean操作相关方法，通过其他接口扩展其功能
+- ApplicationContext接口常用初始化类
+    - **==ClassPathXmlApplicationContext(常用)==**
+    - FileSystemXmlApplicationContext
+
+#### bean相关
+
+bean的主要属性。
+
+![image-20231121215945663](typora文档图片/image-20231121215945663.png)
+
+#### 依赖注入
+
+**setter注入**和**构造器注入**。
+
+![image-20231121220013731](typora文档图片/image-20231121220013731.png)
