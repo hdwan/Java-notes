@@ -84,19 +84,32 @@ setenforce 0
 
 ## 安装jdk
 
-1. 查看yum源中JDK版本：
+1. [官网](https://www.oracle.com/java/technologies/javase/javase8u211-later-archive-downloads.html)下载服务器系统版本对应的jdk压缩包，然后上传到服务器
+
+2. 在jdk安装路径进行解压：
 
     ```shell
-    yum list java*
+    tar -xvzf 压缩包名字
+    // 移动压缩包或者解压后的文件夹
+    mv 压缩包名字或者文件夹路径 目标路径
     ```
 
-2. 使用yum安装JDK1.8.0。
+3. 配置环境变量并更新
 
     ```shell
-    yum -y install java-1.8.0-openjdk*
+    #在profile文件末尾添加
+    export JAVA_HOME=/usr/java/jdk1.8.0_65 // 注意这里改为自己的安装路径
+    export PATH=$PATH:$JAVA_HOME/bin
+    export CLASSPATH=.:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
     ```
 
-3. 查看是否安装成功。
+    重新生效profile
+
+    ```shell
+    source /etc/profile
+    ```
+
+4. 查看是否安装成功。
 
     ```shell
     java -version
@@ -105,57 +118,13 @@ setenforce 0
     如果显示如下所示，则表示JDK安装成功。
 
     ```shell
-    [root@ ~]# java -version
-    openjdk version "1.8.0_342"
-    OpenJDK Runtime Environment (build 1.8.0_342-b07)
-    OpenJDK 64-Bit Server VM (build 25.342-b07, mixed mode)
+    # java -version
+    java version "1.8.0_381"
+    Java(TM) SE Runtime Environment (build 1.8.0_381-b09)
+    Java HotSpot(TM) 64-Bit Server VM (build 25.381-b09, mixed mode)
     ```
 
-4. 配置环境变量。
-
-    1. 查看JDK安装的路径：
-
-        ```shell
-        find /usr/lib/jvm -name 'java-1.8.0-openjdk-1.8.0*'
-        ```
-
-        回显信息如下所示。
-
-        ```shell
-        [root@test~]# find /usr/lib/jvm -name 'java-1.8.0-openjdk-1.8.0*'
-        /usr/lib/jvm/java-1.8.0-openjdk-1.8.0.342.b07-1.el7_9.x86_64
-        ```
-
-    2. 打开配置文件。
-
-        ```shell
-        vim /etc/profile
-        ```
-
-    3. 在配置文件末尾，按 `i` 进入编辑模式。
-
-    4. 添加以下信息。
-
-        **说明**
-
-        `JAVA_HOME`值为**当前JDK安装**的路径。
-
-        ```shell
-        JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.342.b07-1.el7_9.x86_64
-        PATH=$PATH:$JAVA_HOME/bin
-        CLASSPATH=.:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
-        export JAVA_HOME CLASSPATH PATH
-        ```
-
-    5. 按下`Esc`键，输入`:wq`并回车以保存并关闭文件。
-
-    6. 运行以下命令，立即生效环境变量。
-
-        ```shell
-        source /etc/profile
-        ```
-
-    
+    **注意**：
 
     修改环境变量后，可能会导致执行其他命令时，出现类似`-bash: chmod: command not found`这样的问题，执行**export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin**即可。
 
@@ -346,6 +315,238 @@ setenforce 0
     Tomcat is running with pid: 11837            
     ```
 
+## 安装MySQL
+
+1. 查看是否已安装，如果曾经安装了，卸载：
+
+    ```shell
+    // 查看当前系统中的mysql
+    rpm -qa | grep -i mysql 
+    // 卸载
+    rpm -e mysql-libs-5.1.71-1.e16.x68_64（根据上面查看的内容更改） --nodeps
+    ```
+
+2. 安装：
+
+    ```
+    sudo apt install mysql-server
+    ```
+
+3. 查看mysql的状态：
+
+    ```
+    sudo service mysql status
+    ```
+
+4. 设置mysql密码：
+
+    ```
+    sudo mysql // 进入mysql
+    ALTER USER '用户名' IDENTIFIED WITH mysql_native_password BY '密码';
+    ```
+
+5. 登录mysql：
+
+    说明：设置了mysql密码后，就无法通过` sudo mysql`命令进入了，需要使用下面的输入密码的方式进入。
+
+    ```
+    mysql -u root -p
+    ```
+
+    如果想回到用`sudo mysql`的方式登录，可以使用如下命令：
+
+    ```shell
+    ALTER USER '用户名' IDENTIFIED WITH auth_socket;
+    ```
+
+6. 
+
+## 配置MySQL
+
+### 配置安全信息
+
+1. 启动并设置**开机自启动**MySQL服务：
+
+    ```shell
+    sudo systemctl start mysqld
+    sudo systemctl enable mysqld
+    ```
+
+2. 对MySQL进行安全性配置：
+
+    ```shell
+    sudo mysql_secure_installation
+    ```
+
+    1. 是否修改密码：
+
+        ```shell
+        # 是否需要修改密码
+        Change the password for root ? ((Press y|Y for Yes, any other key for No) :N
+        ```
+
+    2. 是否设置密码验证组件：
+
+        ```shell
+        would you like to setup validate password component？
+        Press y|Y for Yes, any other key for No) :Y
+        ```
+
+    3. 选择密码安全等级：
+
+        ```
+        There are three levels of password validation policy:
+        
+        LOW    Length >= 8
+        MEDIUM Length >= 8, numeric, mixed case, and special characters
+        STRONG Length >= 8, numeric, mixed case, special characters and dictionary                  file
+        
+        Please enter 0 = LOW, 1 = MEDIUM and 2 = STRONG: 1
+        ```
+
+        分别是低中高。第二个是：数字、大小写、特殊字符
+
+    4. 根据提示信息，删除匿名用户。
+
+        ```shell
+        Remove anonymous users? (Press y|Y for Yes, any other key for No) :Y #输入Y删除MySQL默认的匿名用户。
+        Success.
+        ```
+
+    5. 禁止root账号远程登录。
+
+        ```shell
+        # 输入Y禁止root远程登录。
+        Disallow root login remotely? (Press y|Y for Yes, any other key for No) :Y 
+        Success.
+        ```
+
+        禁止root远程，后续创建新用户进行远程登录。
+
+    6. 删除test库以及对test库的访问权限。
+
+        ```shell
+        Remove test database and access to it? (Press y|Y for Yes, any other key for No) :Y #输入Y删除test库以及对test库的访问权限。
+         - Dropping test database...
+        Success.
+        
+         - Removing privileges on test database...
+        Success.
+        ```
+
+    7. 重新加载授权表。
+
+        ```shell
+        Reload privilege tables now? (Press y|Y for Yes, any other key for No) :Y #输入Y重新加载授权表。
+        Success.
+        All done!
+        ```
+
+### 远程访问MySQL
+
+1. 输入root用户的密码登录MySQL。
+
+    ```shell
+    sudo mysql -uroot -p
+    ```
+
+2. 创建远程登录MySQL的账号，并允许远程主机使用该账号访问MySQL：
+
+    注意：密码需要符合上面设置的密码安全等级的规范。
+
+    ```shell
+    create user '用户名' identified by '密码'; 
+    #为用户授权数据库所有权限。
+    grant all privileges on *.* to '用户名'; 
+    #刷新权限。
+    flush privileges; 
+    ```
+
+3. 执行以下命令，退出数据库。
+
+    ```shell
+    exit
+    ```
+
+4. 修改mysql配置文件，允许远程连接：
+
+    ```shell
+    vi /etc/mysql/mysql.conf.d/mysqld.conf
+    bind-address = 0.0.0.0  # 0.0.0.0表示允许所有ip访问  默认是127.0.0.1 只允许本地访问
+    port = 3306
+    ```
+
+    注意：这里的路径是使用apt安装的MySQL的路径，如果使用其他方法，需要更换对应的配置文件的路径。
+
+5. 使用设置的账号远程登录MySQL。（如navicat）
+
+## 项目部署
+
+通过`maven`生成jar包，然后将jar包上传到服务器并启动。
+
+### jar包生成
+
+1. 将项目的父工程设置为 `spring-boot`。
+
+```xml
+ <parent>
+     <groupId>org.springframework.boot</groupId>
+     <artifactId>spring-boot-starter-parent</artifactId>
+     <version>2.7.9</version>
+     <relativePath/>
+</parent>
+```
+
+注意：这里规定了父工程的版本，子项目也需要使用相同版本的spring-boot（2）。
+
+2. 添加maven插件
+
+    如果项目的pom配置文件中没有的话，需要添加maven插件。
+
+    ```
+        <build>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>2.7.9</version>
+                </plugin>
+            </plugins>
+        </build>
+    ```
+
+    有了maven插件后，spring boot可以通过spring-boot-maven-plugin将所有应用启动运行所需要的jar都包含进来，从逻辑上将具备了独立运行的条件。
+
+2. 打包生成jar包并上传到服务器。
+
+### jar启动
+
+1. 查看当前`Java`进程：
+
+    ```shell
+    ps -ef | grep java 
+    # 示例
+    root        6123    5705 15 16:54 pts/0    00:00:08 java -jar test-0.0.1-SNAPSHOT.jar
+    ```
+
+2. 根据进程号关闭对应进程：
+
+    ```shell
+    kill pid # pid是进程号，但是无法关闭后台进程、守护进程等
+    kill - 9 pid # 强制关闭进程
+    ```
+
+3. 启动对应的jar包
+
+    ```shell
+    nohup  java -jar xxx.jar >> daily.log & 
+    ```
+
+    说明：`nohup`表示进程可以后台运行，程序的输出信息会输出到daily.log日志文件中，默认会自动创建该文件。
+
 ## 注意事项
 
 这里的安装是基于centos系统，`yum`是centos中的软件包管理器，Ubuntu中的是`apt`。
+
+
+
