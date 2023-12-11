@@ -865,9 +865,115 @@ REST风格的描述，使请求地址变的简单了，并且光看请求URL并�
 
 **代码实现**
 
-**增**：
+### **增**
 
+```java
+    @RequestMapping(value = "/users", method = RequestMethod.POST)
+    public String save() {
+        System.out.println("新增");
+        return "OK";
+    }
 ```
 
+请求路径为：/users，访问该方法必须使用 `POST`，否则会报错。
+
+也可以直接用**`@PostMapping`**注解代替。
+
+### 删
+
+```java
+    @RequestMapping(value = "/users", method = RequestMethod.DELETE)
+    @ResponseBody
+    public String delete() {
+        System.out.println("删除" + id);
+        return "OK";
+    }
 ```
 
+请求路径：`/users`，访问该方法使用 `DELETE`。
+
+**传递请求参数**：通过路径传递参数。
+
+格式：: http://localhost:8080/users/1 
+
+```java
+    @RequestMapping(value = "/users/{id}", method = RequestMethod.DELETE)
+    @ResponseBody
+    public String delete(@PathVariable Integer id) {
+        System.out.println("删除" + id);
+        return "OK";
+    }
+// 方法的参数和路径里的参数不一样时，需要在PathVariable注解后添加属性
+@RequestMapping(value = "/users/{userId}", method = RequestMethod.DELETE)
+public String delete(@PathVariable("userId") Integer id) {}
+// 多个参数
+@RequestMapping(value = "/users/{id}/{name}", method = RequestMethod.DELETE)
+public String delete(@PathVariable Integer id, @PathVariable String name) {}
+```
+
+也可以直接用**`@DeleteMapping`**注解代替。
+
+### 改
+
+```java
+@RequestMapping(value = "/users",method = RequestMethod.PUT)
+@ResponseBody
+public String update(@RequestBody User user) {
+    System.out.println("修改" + user);
+    return "OK";
+}
+```
+
+请求路径：`/users`，访问该方法使用 `DELETE`。
+
+用json格式通过请求体传参数，用@RequestBody注解来解析。
+
+也可以直接用**`@PutMapping`**注解代替。
+
+### 查
+
+**按照id查询**
+
+```java
+@RequestMapping(value = "/users/{id}" ,method = RequestMethod.GET)
+@ResponseBody
+public String getById(@PathVariable Integer id){
+    System.out.println("查"+id);
+    return "OK";
+}
+```
+
+请求路径为：`/users/xxid`，使用 `GET`。
+
+**查询所有**
+
+```java
+@RequestMapping(value = "/users" ,method = RequestMethod.GET)
+@ResponseBody
+public String getById(){
+    System.out.println("查所有");
+    return "OK";
+}
+```
+
+也可以直接用**`@GetMapping`**注解代替。
+
+### 参数传递的区别
+
+**@RequestParam**注解：用于接收url**地址传参**或表单传参。示例：`localhost:8080/query?name=apple`。
+
+**@RequestBody**注解：用于接收json数据。
+
+**@PathVariable**：用于接收路径参数，使用{参数名称}描述路径参数。示例：`localhost:8080/user/{id}`。
+
+**习惯**
+
+发送请求参数超过 1 个时，以 `json` 格式为主，用@RequestBody应用较广。
+
+如果发送非json格式数据，选用@RequestParam接收请求参数
+
+采用RESTful进行开发，当参数数量较少时，例如1个，可以采用`@PathVariable`接收请求路径变量，通常用于传递`id`值。
+
+### RestController
+
+`@RestController`注解： 用于类上方，设置当前控制器类为RESTful风格，等同于@Controller与@ResponseBody两个注解组合功能。这样每个方法上面就不用再单独添加`@ResponseBody`注解了。
