@@ -43,12 +43,27 @@ SpringMVC==主要==负责的就是：
 
 **SpringMVC**：
 
-* SpringMVC是一种基于Java实现MVC模型的轻量级Web框架；
+* SpringMVC是一种基于Java实现MVC模型的轻量级Web框架；是Spring框架的一个子项目。
 
 * 优点
 
     * 使用简单、开发便捷(相比于Servlet)；
     * 灵活性强；
+
+### MVC的概念
+
+MVC是一种软件架构的思维，将软件按照 **模型**、**视图**、**控制器** 来划分。
+
+M：`Model`，模型层，指工程中的JavaBean，作用是处理数据。
+
+- JavaBean分为两类：
+    - 一类成为**实体类Bean**，专门存储数据业务，如**POJO实体类**；
+    - 一类成为**业务处理Bean**，指**Service或者Dao对象**，专门用于处理业务逻辑或和数据访问；
+
+V：`View`，视图层，指工程中的html或者jsp页面，作用是与用户进行交互，展示数据；
+
+C：`Controller`，控制层，指工程中的Servlet，作用是接收请求和响应浏览器；
+
 
 
 ## 入门案例

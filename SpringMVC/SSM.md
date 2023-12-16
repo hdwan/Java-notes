@@ -262,9 +262,15 @@ public class ProjectExceptionAdvice {
 
 如果我们需要**在每个Controller方法执行的前后添加业务**，就**需要拦截器**实现。
 
-**拦截器**（Interceptor）是一种动态拦截方法调用的机制，在SpringMVC中动态拦截控制器方法的执行
+**拦截器**（Interceptor）是一种动态拦截方法调用的机制，在SpringMVC中动态拦截控制器方法的执行。
 
 **作用**：在指定的方法调用前后执行预先设定的代码，阻止原始方法的执行，其实拦截器就是用来做增强的。
+
+**说明**：
+
+- SpringMVC中的拦截器用于拦截控制器方法的执行；
+- SpringMVC中的拦截器需要实现HandlerInterceptor；
+- SpringMVC中的拦截器必须在SpringMVC的配置文件中进行配置；
 
 **拦截器和过滤器之间的区别**：
 
@@ -478,4 +484,16 @@ public class SpringMvcConfig implements WebMvcConfigurer {
 
 根据`addInterceptors`方法中的拦截器配置执行对应拦截器。
 
-先进后出。
+**先进后出。**
+
+**多个拦截器的执行顺序**
+
+1. 若每个拦截器preHandle()都返回true：
+    - 此时多个拦截器的执行顺序，与拦截器在SpringMVC的配置文件中的配置顺序有关；
+    - preHandle()会按照配置的顺序执行，而postHandle()和afterComplation()会按照配置的反序执行；
+
+2. 若某个拦截器的preHandle()返回了false：
+    - preHandle()返回false和之前的拦截器的preHandle()都执行；
+    - postHandle()不会执行，返回false的拦截器之前的afterComplation()会执行；
+
+
