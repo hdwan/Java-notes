@@ -24,7 +24,7 @@ Spring Security**本质**上就是一个过滤器链，通过过滤器拦截请�
 
 ### 默认认证
 
-创建一个spring boot项目，主要安装两个依赖：
+创建一个 spring boot 项目，主要安装两个依赖：
 
 ![image-20231223211333994](typora文档图片/image-20231223211333994.png)
 
@@ -99,141 +99,602 @@ public class Test {
 
 首先，Spring Security 中 `认证、授权` 等功能都是基于 `过滤器` 完成的。
 
-在SpringSecurity框架中有三个非常核心的类和接口，分别是：
+1. 观察控制台日志输出：
 
-- SecurityFilterChain接口；
-- FilterChainProxy类；
-- DelegatingFilterProxy类；
+    ![image-20231228171757163](typora文档图片/image-20231228171757163.png)
 
-这个三个接口和类的相互之间的步骤关系如下：
-
-1. 生成一个`FilterChainProxy`类型的对象，该类有一个**属性**`filterChains`，是SecurityFilterChain类型的List集合；该对象被spring容器通过bean管理，名称为 `springSecurityFilterChain`， 类型为`FilterChainProxy`。
-
-    底层通过`FilterChainProxy`代理去调用各种Filter(Filter链)，`Filter`通过调用`AuthenticationManager`完成认证 ，通过调用`AccessDecisionManager`完成授权。
+    项目启动时候的**临时密码**是**org.springframework.boot.autoconfigure.security.servlet**包下的`UserDetailsServiceAutoConfiguration`类生成的，部分源码如下：
 
     ```java
-    // SecurityFilterChain
-    public interface SecurityFilterChain {
-        boolean matches(HttpServletRequest request);
+        private String getOrDeducePassword(SecurityProperties.User user, PasswordEncoder encoder) {
+            String password = user.getPassword();
+            if (user.isPasswordGenerated()) {
+                logger.warn(String.format("%n%nUsing generated security password: %s%n%nThis generated password is for development use only. Your security configuration must be updated before running your application in production.%n", user.getPassword()));
+            }
     
-        List<Filter> getFilters();
-    }
-    
-    // FilterChainProxy
-    public class FilterChainProxy extends GenericFilterBean {
-        private List<SecurityFilterChain> filterChains;
-    }
+            return encoder == null && !PASSWORD_ALGORITHM_PATTERN.matcher(password).matches() ? "{noop}" + password : password;
+        }
     ```
 
-2. 生成一个DelegatingFilterProxy类型的对象，将名为springSecurityFilterChain的bean（上面的）作为`DelegatingFilterProxy`类对象的**属性targetBeanName的值**，供后面请求时获取bean。这样`FilterChainProxy`类型的对象就被`DelegatingFilterProxy`类型的对象委托管理了。
+2. 从源码可以看出，密码来自于 `SecurityProperties` 的内部类 `User`：`SecurityProperties.User user`，查看源码：
 
-    注意：DelegatingFilterProxy对象的生成是tomcat启动过程中会调用所有继承了RegistrationBean类的onStartUp方法，最终调用了实现类中的addRegistration方法。
+    ![image-20231228194946471](typora文档图片/image-20231228194946471.png)
 
-3. 前端发起请求时，调用了DelegatingFilterProxy类型的拦截器执行doFilter方法。doFilter方法获取被委托的对象FilterChainProxy并调用其doFilter方法（即FilterChainProxy的doFilter方法），执行获取到的所有的拦截器然后再获取代理对象执行容器加载时保存的拦截器再执行。
+    `User` 是 `SecurityProperties` 的静态内部类，默认的用户名为“user”，且密码的生成方式是UUID。
 
--------------------------------**第一步**-------------------------------
+    **此外**：该类上添加了注解 `@ConfigurationProperties`：
 
-**生成一个FilterChainProxy类型的对象**
+    - 该注解的作用：获取配置文件中的属性值，类似于 `@Value` 注解。
+    - 前缀 `prefix` ：定义了哪些外部属性将绑定到类的字段上。
 
-![image-20231225134414405](typora文档图片/image-20231225134414405.png)
+    所以我们可以在配置文件中自己设置用户名和密码：
 
-可以看到请求访问时，`DelegatingFilterProxy`管理`FilterChainProxy`，`FilterChainProxy`里调用`SecurityFilterChain`类型的过滤器。
+    ```yaml
+    spring:
+      security:
+        user:
+          password: admin
+          name: admin
+    ```
 
-[Java SPI 机制](https://blog.csdn.net/qq_37967783/article/details/131505676)
+    分析`User`静态类的源码可以发现，属性 `passwordGenerated` 的值默认为true，即密码不指定的话默认是自动生成的，如果我们在配置文件中重新设置了用户密码，则创建`User`的时候进行setter注入就会将配置文件的用户名密码注入，并将`passwordGenerated`设置为`false`，此时`UserDetailsServiceAutoConfiguration`类的就不会打印密码了，如下图。
 
-Spring的Factories就是Spring版本的Java Spi，我在关于java基础系列文章中有详细介绍Java SPI机制。 Spring Factories的最重要的功能就是：可以通过配置文件指定Spring容器加载一些特定的组件。
+    ![image-20231228200352185](typora文档图片/image-20231228200352185.png)
 
-Spring Factories是一种类似于Java SPI的机制，它在META-INF/spring.factories文件中配置接口的实现类名称，然后在程序中读取这些配置文件并实例化。
+![image-20231228201113115](typora文档图片/image-20231228201113115.png)
 
-在springboot启动过程中会获取spring.factories配置文件里的配置类并加载到spring容器中，观察spring.factories配置文件里的配置内容，涉及到springsecurity的如下图红框处所示。
-
-![image-20231225170234268](typora文档图片/image-20231225170234268.png)
-
-先看 `SecurityAutoConfiguration` 和 `SecurityFilterAutoConfiguration` 这两个配置类：
-
-![image-20231225170325342](typora文档图片/image-20231225170325342.png)
-
-**配置类是如何获取到 springSecurityFilterChain这个bean的**
-
-分析`SecurityAutoConfiguration`配置类：
+继续看 `UserDetailsServiceAutoConfiguration`，该类以 `AutoConfiguration` 结尾，即自动配置类，该类上添加的注解：
 
 ```java
+注释：
+Auto-configuration for a Spring Security in-memory AuthenticationManager. Adds an InMemoryUserDetailsManager with a default user and generated password. This can be disabled by providing a bean of type AuthenticationManager, AuthenticationProvider or UserDetailsService.
+
+自动配置内存中的Spring Security AuthenticationManager。使用默认用户和生成的密码添加InMemoryUserDetailsManager。可以通过提供AuthenticationManager、AuthenticationProvider或UserDetailsService类型的bean来禁用。
+
 @Configuration(
     proxyBeanMethods = false
 )
-@ConditionalOnClass({DefaultAuthenticationEventPublisher.class})
-@EnableConfigurationProperties({SecurityProperties.class})
-@Import({SpringBootWebSecurityConfiguration.class, WebSecurityEnablerConfiguration.class, SecurityDataConfiguration.class, ErrorPageSecurityFilterConfiguration.class})
-public class SecurityAutoConfiguration {
-    public SecurityAutoConfiguration() {
-    }
+@ConditionalOnClass({AuthenticationManager.class})
+@ConditionalOnBean({ObjectPostProcessor.class})
+@ConditionalOnMissingBean(
+    value = {AuthenticationManager.class, AuthenticationProvider.class, UserDetailsService.class, AuthenticationManagerResolver.class},
+    type = {"org.springframework.security.oauth2.jwt.JwtDecoder", "org.springframework.security.oauth2.server.resource.introspection.OpaqueTokenIntrospector", "org.springframework.security.oauth2.client.registration.ClientRegistrationRepository"}
+)
+public class UserDetailsServiceAutoConfiguration {
+```
+
+**关于自动配置类**：Spring Boot的自动配置功能是**通过条件注解实现**的。这种方式可以根据一定的条件来判断是否需要自动配置某些组件，在程序启动时**自动装配这些组件到Spring容器中**。这样,我们在使用Spring Boot时，只需要添加相应的依赖，就可以直接使用这些组件了，无需手动配置。
+
+所以 该类是自动配置类，可以使用默认的用户和生成的密码。
+
+注解 `@ConditionalOnXxxxx` 和 `@ConditionalOnMissingXxxxx` 表示项目中包含`Xxxxx` 和不包含 `Xxxxx` 的时候才满足条件。
+
+注意：`@ConditionalOnMissingXxxxx`的参数value表示数组里所有Xxxxx都不在项目中才满足条件。
+
+所以该类在类路径下存在 `AuthenticationManager` 、在Spring 容器中存在`Bean` `ObjectPostProcessor` 并且不存在`Bean` `AuthenticationManager` , `AuthenticationProvider` , `UserDetailsService` 的情况下生效。
+
+因此可以手动实现value数组中任何一个使得条件不生效，从而不使用 `UserDetailsServiceAutoConfiguration` 自动配置类。（注释中也说明了）
+
+所以一般自己实现 `UserDetailsService` 接口。
+
+接着分析 `UserDetailsServiceAutoConfiguration` 的源码：
+
+```java
+public class UserDetailsServiceAutoConfiguration {
+
+	private static final String NOOP_PASSWORD_PREFIX = "{noop}";
+
+	private static final Pattern PASSWORD_ALGORITHM_PATTERN = Pattern.compile("^\\{.+}.*$");
+
+	private static final Log logger = LogFactory.getLog(UserDetailsServiceAutoConfiguration.class);
+
+	@Bean
+	@Lazy
+	public InMemoryUserDetailsManager inMemoryUserDetailsManager(SecurityProperties properties,
+			ObjectProvider<PasswordEncoder> passwordEncoder) {
+		SecurityProperties.User user = properties.getUser();
+		List<String> roles = user.getRoles();
+		return new InMemoryUserDetailsManager(
+				User.withUsername(user.getName()).password(getOrDeducePassword(user, passwordEncoder.getIfAvailable()))
+						.roles(StringUtils.toStringArray(roles)).build());
+	}
+
+	private String getOrDeducePassword(SecurityProperties.User user, PasswordEncoder encoder) {
+		String password = user.getPassword();
+		if (user.isPasswordGenerated()) {
+			logger.warn(String.format(
+					"%n%nUsing generated security password: %s%n%nThis generated password is for development use only. "
+							+ "Your security configuration must be updated before running your application in "
+							+ "production.%n",
+					user.getPassword()));
+		}
+		if (encoder != null || PASSWORD_ALGORITHM_PATTERN.matcher(password).matches()) {
+			return password;
+		}
+		return NOOP_PASSWORD_PREFIX + password;
+	}
+
+}
+```
+
+该类通过 `@Lazy` （该注解表示只有在需要使用时才会被实例化,以减少启动时间和资源占用）初始化了类名为 `InMemoryUserDetailsManager` 的内存用户管理器：
+
+```java
+public class InMemoryUserDetailsManager implements UserDetailsManager, UserDetailsPasswordService {
+    .....
+}
+public interface UserDetailsManager extends UserDetailsService {
+    .....
+}
+```
+
+该管理器实现了 `UserDetailsManager` 接口，通过配置注入了一个默认的 UserDetails 存在内存中，就是我们上面用的那个 user ，每次启动 user 都是动态生成的。而 `UserDetailsManager` 接口又继承了 `UserDetailsService` 接口（注意：接口可以继承接口，实体类不能继承接口，只能实现），所以实际上还是用 `UserDetailsService` 加载用户信息。
+
+下面看 `UserDetailsService` 接口:
+
+```java
+public interface UserDetailsService {
+    UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
+}
+```
+
+一个很简单的接口，只有一个方法：`loadUserByUsername`，即通过用户名来加载用户。这个方法主要用于从系统数据中查询并加载具体的用户到 Spring Security中。返回类型是 `UserDetails`，交给spring。
+
+`UserDetails`：该接口是**提供用户信息的核心接口**。该接口**的实现仅仅存储用户的信息**。后续会将该接口提供的用户信息封装到认证对象 Authentication 中去。 UserDetails 默认提供了：
+
+```java
+public interface UserDetails extends Serializable {
+	// 用户的权限集， 默认需要添加 ROLE_ 前缀
+	Collection<? extends GrantedAuthority> getAuthorities();
+	// 用户的加密后的密码， 不加密会使用 {noop} 前缀
+	String getPassword();
+    // 应用内唯一的用户名
+	String getUsername();
+    // 账户是否过期
+	boolean isAccountNonExpired();
+    // 账户是否锁定
+	boolean isAccountNonLocked();
+    // 凭证是否过期
+	boolean isCredentialsNonExpired();
+	// 用户是否可用
+	boolean isEnabled();
+
+}
+```
+
+可以实现该接口以存储更多的用户信息。比如用户的邮箱、手机 号等等。通常我们使用其实现类：
+
+```java
+org.springframework.security.core.userdetails.User
+```
+
+该类内置一个建造器 UserBuilder 会很方便地帮助我们构建 UserDetails 对象。
+
+**自定义用户管理**
+
+上面提到过默认使用的是`UserDetailsManager` 的实现类 `InMemoryUserDetailsManager` 进行用户管理，我们可以定义自己的 UserDetailsManager Bean，实现我们需要的用户管理逻辑：
+
+```JAVA
+@Configuration
+public class UserDetailsServiceConfiguration {
 
     @Bean
-    @ConditionalOnMissingBean({AuthenticationEventPublisher.class})
-    public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
-        return new DefaultAuthenticationEventPublisher(publisher);
+    public UserDetailsRepository userDetailsRepository() {
+        UserDetailsRepository userDetailsRepository = new UserDetailsRepository();
+
+        // 为了让我们的登录能够运行 这里我们初始化一个用户Felordcn 密码采用明文 当你在密码12345上使用了前缀{noop} 意味着你的密码不使用加密，authorities 一定不能为空 这代表用户的角色权限集合
+        UserDetails felordcn = User.withUsername("Felordcn").password("{noop}12345").authorities(AuthorityUtils.NO_AUTHORITIES).build();
+        userDetailsRepository.createUser(felordcn);
+        return userDetailsRepository;
+    }
+
+
+    @Bean
+    public UserDetailsManager userDetailsManager(UserDetailsRepository userDetailsRepository) {
+        return new UserDetailsManager() {
+            @Override
+            public void createUser(UserDetails user) {
+                userDetailsRepository.createUser(user);
+            }
+
+            @Override
+            public void updateUser(UserDetails user) {
+                userDetailsRepository.updateUser(user);
+            }
+
+            @Override
+            public void deleteUser(String username) {
+                userDetailsRepository.deleteUser(username);
+            }
+
+            @Override
+            public void changePassword(String oldPassword, String newPassword) {
+                userDetailsRepository.changePassword(oldPassword, newPassword);
+            }
+
+            @Override
+            public boolean userExists(String username) {
+                return userDetailsRepository.userExists(username);
+            }
+
+            @Override
+            public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+                return userDetailsRepository.loadUserByUsername(username);
+            }
+        };
+    }
+}
+
+
+/**
+ * 自己实现 UserDetailsManager
+ * @author Daniel
+ * @date 2023/12/28
+ */
+public class UserDetailsRepository {
+
+    /**
+     * 替换为 抽象DAO接口可进行用户持久化操作
+     */
+    private Map<String, UserDetails> users = new HashMap<>();
+
+    /**
+     * Create user.
+     * @param user the user
+     */
+    public void createUser(UserDetails user) {
+        users.putIfAbsent(user.getUsername(), user);
+    }
+
+    /**
+     * Update user.
+     * @param user the user
+     */
+    public void updateUser(UserDetails user) {
+        users.put(user.getUsername(), user);
+    }
+
+    /**
+     * Delete user.
+     * @param username the username
+     */
+    public void deleteUser(String username) {
+        users.remove(username);
+    }
+
+    /**
+     * Change password.
+     * @param oldPassword the old password
+     * @param newPassword the new password
+     */
+    public void changePassword(String oldPassword, String newPassword) {
+        Authentication currentUser = SecurityContextHolder.getContext()
+                .getAuthentication();
+
+        if (currentUser == null) {
+            // This would indicate bad coding somewhere
+            throw new AccessDeniedException(
+                    "Can't change password as no Authentication object found in context "
+                            + "for current user.");
+        }
+
+        String username = currentUser.getName();
+
+        UserDetails user = users.get(username);
+
+
+        if (user == null) {
+            throw new IllegalStateException("Current user doesn't exist in database.");
+        }
+
+        // 实现具体的更新密码逻辑
+    }
+
+    /**
+     * User exists boolean.
+     * @param username the username
+     * @return the boolean
+     */
+    public boolean userExists(String username) {
+        return users.containsKey(username);
+    }
+
+    /**
+     * Load user by username user details.
+     * @param username the username
+     * @return the user details
+     * @throws UsernameNotFoundException the username not found exception
+     */
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return users.get(username);
+    }
+
+}
+```
+
+只需要将 UserDetailsRepository 中的 users 属性替代为抽象的Dao接口，即可使用数据库来管理用户。
+
+
+
+### 密码加密
+
+```java
+	public InMemoryUserDetailsManager inMemoryUserDetailsManager(SecurityProperties properties,	ObjectProvider<PasswordEncoder> passwordEncoder) {
+```
+
+上面的`UserDetailsServiceAutoConfiguration` 的源码里在初始化 `InMemoryUserDetailsManager` 的时候，传入了一个参数：`ObjectProvider<PasswordEncoder>`，这里的 **`PasswordEncoder`** 就是对密码进行编码的工具接口。该接口只有两个功能： 匹配验证、密码编码。
+
+```java
+public interface PasswordEncoder {
+    String encode(CharSequence rawPassword); // 编码
+    boolean matches(CharSequence rawPassword, String encodedPassword); // 匹配 明文和密文
+    // 该方法用来判断当前密码是否需要升级，可以看见这个方法是默认的
+	// 默认返回值是 false
+    default boolean upgradeEncoding(String encodedPassword) {
+        return false;
     }
 }
 ```
 
-该配置类里导入的四个配置类：
+`PasswordEncoder` 的常见实现类：
 
-- SpringBootWebSecurityConfiguration.class：作用是WebSecurityConfigurerAdapter 类存在但是bean对象不存在时注册默认的WebSecurityConfigurerAdapter 类型是DefaultConfigurerAdapter的bean。
+- `BCryptPasswordEncoder`：加密密码；
+- `DelegatingPasswordEncoder`：委托密码编码器；
 
-    ```java
-    @Configuration(
-        proxyBeanMethods = false
-    )
-    @ConditionalOnDefaultWebSecurity
-    @ConditionalOnWebApplication(
-        type = Type.SERVLET
-    )
-    class SpringBootWebSecurityConfiguration {
-        SpringBootWebSecurityConfiguration() {
+#### 委托密码编码器 DelegatingPasswordEncoder
+
+Delegate，委托。即自己不干，交给别人干。
+
+之所以使用 委托 设计模式，而不直接使用具体的加密类，原因：
+
+- 有很多应用程序使用旧的密码编码不容易进行迁移；
+- 密码存储的最佳实践就被更改了；
+- 而 Spring Security 作为一个框架而言，不能这么轻易地带破坏性的更改。
+
+使用 DelegatingPasswordEncoder 的好处：
+
+- 确保使用的密码编码可以进行规范的正确的密码存储；
+- 允许以现代和遗留格式验证密码；
+- 允许将来升级编码；
+
+该类的成员属性：
+
+```java
+public class DelegatingPasswordEncoder implements PasswordEncoder {
+    // 默认包裹 id 的前、后缀
+	private static final String PREFIX = "{";
+	private static final String SUFFIX = "}";
+	private final String idForEncode; // 通过id来匹配具体编码器，即用来匹配 PasswordEncoder的实现类
+	private final PasswordEncoder passwordEncoderForEncode; // 实际采用的加密的方案对象，即PasswordEncoder的某种实现类 如BCryptPasswordEncoder
+	private final Map<String, PasswordEncoder> idToPasswordEncoder; // 用来维护多个 idForEncode 与具体 PasswordEncoder 实现类的映射关系。 DelegatingPasswordEncoder 初始化时
+装载进去，会在初始化时进行一些规则校验。
+	private PasswordEncoder defaultPasswordEncoderForMatches = new UnmappedIdPasswordEncoder(); // 默认的密码匹配器，上面的 Map 中都不存在就用它来执行 	matches 方法进行匹配验证。这是一个内部类实现。
+	}
+```
+
+`DelegatingPasswordEncoder` 中的编码方法：
+
+```java
+	@Override
+	public String encode(CharSequence rawPassword) {
+		return PREFIX + this.idForEncode + SUFFIX + this.passwordEncoderForEncode.encode(rawPassword);
+	}
+```
+
+可以看出编码规则：`{idForEncode}encodePassword`，即 前缀 + 编码方式 + 后缀 + 原始密码编码后的密码。
+
+`DelegatingPasswordEncoder` 中的**密码匹配**方法：
+
+```java
+	@Override
+	// rawPassword 是原密码，即用户输入的
+    // prefixEncodePassword 可以理解为是保存在数据库中的密码（数据库保存的是密文）
+	public boolean matches(CharSequence rawPassword, String prefixEncodedPassword) {
+		if (rawPassword == null && prefixEncodedPassword == null) {
+			return true;
+		}
+		String id = extractId(prefixEncodedPassword); // 从 {id} 中获取 id
+		PasswordEncoder delegate = this.idToPasswordEncoder.get(id); // 找出id对应的编码类（PasswordEncoder实现类）
+		if (delegate == null) { // 找不到就用默认的比对方式
+			return this.defaultPasswordEncoderForMatches.matches(rawPassword, prefixEncodedPassword);
+		}
+        // 找到了就进行比对
+		String encodedPassword = extractEncodedPassword(prefixEncodedPassword);
+		return delegate.matches(rawPassword, encodedPassword);
+	}
+```
+
+传入**原始密码和遵循 `{idForEncode}encodePassword` 规则的密码编码串**。通过获取编码方式id ( idForEncode ) 来从 DelegatingPasswordEncoder 中的映射集合 idToPasswordEncoder 中获取具体的 PasswordEncoder 实现类进行匹配校验。找不到就使用默认的`defaultPasswordEncoderForMatches`方法生成的属性 `UnmappedIdPasswordEncoder`。
+
+#### 密码器静态工厂PasswordEncoderFactories
+
+DelegatingPasswordEncoder 在哪实例化的？
+
+`PasswordEncoderFactories`，密码编码器工厂类，专门制造 `PasswordEncoder`。
+
+```java
+public final class PasswordEncoderFactories {
+
+	private PasswordEncoderFactories() {
+	}
+
+	@SuppressWarnings("deprecation")
+	public static PasswordEncoder createDelegatingPasswordEncoder() {
+		String encodingId = "bcrypt";
+		Map<String, PasswordEncoder> encoders = new HashMap<>();
+		encoders.put(encodingId, new BCryptPasswordEncoder());
+		encoders.put("ldap", new org.springframework.security.crypto.password.LdapShaPasswordEncoder());
+		encoders.put("MD4", new org.springframework.security.crypto.password.Md4PasswordEncoder());
+		encoders.put("MD5", new org.springframework.security.crypto.password.MessageDigestPasswordEncoder("MD5"));
+		encoders.put("noop", org.springframework.security.crypto.password.NoOpPasswordEncoder.getInstance());
+		encoders.put("pbkdf2", new Pbkdf2PasswordEncoder());
+		encoders.put("scrypt", new SCryptPasswordEncoder());
+		encoders.put("SHA-1", new org.springframework.security.crypto.password.MessageDigestPasswordEncoder("SHA-1"));
+		encoders.put("SHA-256",
+				new org.springframework.security.crypto.password.MessageDigestPasswordEncoder("SHA-256"));
+		encoders.put("sha256", new org.springframework.security.crypto.password.StandardPasswordEncoder());
+		encoders.put("argon2", new Argon2PasswordEncoder());
+		return new DelegatingPasswordEncoder(encodingId, encoders);
+	}
+
+}
+
+```
+
+可以看出，该类是一个静态类，只提供了初始化 `PasswordEncoder` 的方法 `createDelegatingPasswordEncoder`，即创建`DelegatingPasswordEncoder`。
+
+从方法中可以看出 id 是 `bcrypt`，即默认采用的是`bcrypt`进行编码。
+
+另外，可以看出 `"noop"` 对应的是 `NoOpPasswordEncoder`，即不加密密码，直接使用明文和明文对比，所以前面默认认证以及我们实现管理器的时候密码都会加上 `{noop}`，以此来使用 `NoOpPasswordEncoder` 取代默认的密码加密方式。这也是为啥前端输入的密码xxx能和我们设置的{noop}xxx匹配上。
+
+这样做的好处：增加了”**多样性**“，即使以后我们对密码编码规则进行替换，也不会影响以前的用户使用的加密编码规则。
+
+**Spring Security 加载 PasswordEncoder 的规则**
+
+`PasswordEncoderFactories` 又是从哪来的呢？
+
+`WebSecurityConfigurerAdapter`里面可以找到：
+
+```java
+static class LazyPasswordEncoder implements PasswordEncoder {
+        private ApplicationContext applicationContext;
+        private PasswordEncoder passwordEncoder;
+        LazyPasswordEncoder(ApplicationContext applicationContext) {
+            this.applicationContext = applicationContext;
         }
-    
-        @Bean
-        @Order(2147483642)
-        SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-            ((HttpSecurity)((HttpSecurity)((ExpressionUrlAuthorizationConfigurer.AuthorizedUrl)http.authorizeRequests().anyRequest()).authenticated().and()).formLogin().and()).httpBasic();
-            return (SecurityFilterChain)http.build();
+        public String encode(CharSequence rawPassword) {
+            return this.getPasswordEncoder().encode(rawPassword);
+        }
+        public boolean matches(CharSequence rawPassword, String encodedPassword) {
+            return this.getPasswordEncoder().matches(rawPassword, encodedPassword);
+        }
+        public boolean upgradeEncoding(String encodedPassword) {
+            return this.getPasswordEncoder().upgradeEncoding(encodedPassword);
+        }
+    -------------------------这里----------------
+        private PasswordEncoder getPasswordEncoder() {
+            if (this.passwordEncoder != null) {
+                return this.passwordEncoder;
+            } else {
+                PasswordEncoder passwordEncoder = (PasswordEncoder)this.getBeanOrNull(PasswordEncoder.class);
+                if (passwordEncoder == null) {
+                    passwordEncoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+                }
+
+                this.passwordEncoder = passwordEncoder;
+                return passwordEncoder;
+            }
+        }
+        private <T> T getBeanOrNull(Class<T> type) {
+            try {
+                return this.applicationContext.getBean(type);
+            } catch (NoSuchBeanDefinitionException var3) {
+                return null;
+            }
+        }
+        public String toString() {
+            return this.getPasswordEncoder().toString();
         }
     }
-    ```
+```
 
-    
+在一个实现了 `PasswordEncoder` 接口的静态内部类 `LazyPasswordEncoder` 里面。
 
-- WebSecurityEnablerConfiguration.class：
+该类的 `getPasswordEncoder` 方法中用到了 `PasswordEncoderFactories`。
 
-    该类文件如下，可以看到其中声明了@EnableWebSecurity注解：
+该方法返回 `PasswordEncoder`，如果现有`PasswordEncoder`非空，则直接返回；否则先从spring的ioc容器中找，找到了就返回；如果找不到就用 `PasswordEncoderFactories` 创建的，即用`PasswordEncoderFactories`的方法`createDelegatingPasswordEncoder`创建 `DelegatingPasswordEncoder`。
 
-    ```java
-    @Configuration(
-        proxyBeanMethods = false
-    )
-    // 只有当BeanFactory中没有指定的bean的时候才能匹配，主要是用来做自动配置的，当程序没有配置指定的类的时候，就会使用默认配置
-    @ConditionalOnMissingBean(
-     
-       name = {"springSecurityFilterChain"}
-    )
-    @ConditionalOnClass({EnableWebSecurity.class})
-    @ConditionalOnWebApplication(
-        type = Type.SERVLET
-    )
-    @EnableWebSecurity
-    class WebSecurityEnablerConfiguration {
-        WebSecurityEnablerConfiguration() {
-        }
-    }
-    ```
+上面的**自定义用户管理** 就是先创建了一个 `UserDetailsRepository` 代理默认的 `InMemoryUserDetailsManager` 的功能，将其作为参数（通过bean注解注入容器）传递给`UserDetailsManager`（），再注入spring容器中，这样spring就能找到`PasswordEncoder`，不适用默认的。缺点：只能用一种 PasswordEncoder 进行密码比对，好处就是专一、密码前不用写{id}。
 
-    
+如果不写 {id} 呢？会怎么密码比对呢？
 
-- SecurityDataConfiguration.class：
+从源码中可以看出：执行DelegatingPasswordEncoder 中的默认方案（找不到匹配的时候），即会抛出java.lang.IllegalArgumentException: There is no PasswordEncoder mapped for the id "null"的异常。
 
-- ErrorPageSecurityFilterConfiguration.class
+### 关于bcrypt
+
+前面提到过默认的编码方式是`bcrypt`加密。
+
+`bcrypt` 使用的是布鲁斯·施内尔在1993年发布的 Blowfish 加密算法。 `bcrypt` 算法将 salt 随机并混入最终加密后的密码，验证时也无需单独提供之前的 salt ，从而无需单独处理 salt 问题。加密后的格式一般为：  
+
+```tex
+$2a$10$/bTVvqqlH9UiE0ZJZ7N2Me3RIgUCdgMheyTgV0B4cMCSokPa.6oCa
+```
+
+`$` 是分割符，无意义; `2a` 是 bcrypt 加密版本号； `10` 是 cost 的值；而后的前 22 位是 `salt` 值；再然后的字符串就是密码的密文。
+
+**bcrypt 特点**
+
+- 慢，难以破解。
+- 同样的密码每次使用 bcrypt 编码，密码暗文都是不一样的。
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+配置类中注入PaswordEncoder的bean对象：
+
+```java
+@Bean
+public PasswordEncoder password() {
+    return new BCryptPasswordEncoder();
+}
+```
+
+通常而言，在配置类中注入PaswordEncoder的bean对象是必须的，因为Spring Security 要求容器中必须有 PasswordEncoder 实例,才能加密。所以当我们手动加入自定义登录逻辑时，要求必须给容器注入PaswordEncoder的bean对象。
+
+如果不想使用它自带的加密方式，也可以使用自己的。**写一个类实现PasswordEncoder接口。**
+
+注意：同一个字符串，通过加密生成的字符串每次都不一样，但是尽管每次都不一样，也都不会匹配失败。即同一个密码生成的密文每次都不一样，但是无论是哪个密文，最终都能解析成功。
 
 ### 自定义账户密码
 
@@ -389,22 +850,7 @@ spring:
 
 2. 密码校验是由SpringSecurity内部完成。不需要我们来处理。我们只需要**将数据库查出来的用户名和密码交给spring security提供的User类即可**。即service层里的`loadUserByUsername`方法返回值。
 
-#### 密码加密
 
-配置类中注入PaswordEncoder的bean对象：
-
-```java
-@Bean
-public PasswordEncoder password() {
-    return new BCryptPasswordEncoder();
-}
-```
-
-通常而言，在配置类中注入PaswordEncoder的bean对象是必须的，因为Spring Security 要求容器中必须有 PasswordEncoder 实例,才能加密。所以当我们手动加入自定义登录逻辑时，要求必须给容器注入PaswordEncoder的bean对象。
-
-如果不想使用它自带的加密方式，也可以使用自己的。**写一个类实现PasswordEncoder接口。**
-
-注意：同一个字符串，通过加密生成的字符串每次都不一样，但是尽管每次都不一样，也都不会匹配失败。即同一个密码生成的密文每次都不一样，但是无论是哪个密文，最终都能解析成功。
 
 #### 自定义登录页面
 
@@ -565,6 +1011,23 @@ public void test() {
 
 可以判断是否**具有某个角色**或**权限**，也判断是否**同时具有某些角色**或**权限**
 
+```java
+@PreAuthorize("hasRole('ROLE_ADMIN') and hasRole('ROLE_USER')")
+```
+
+```java
+@PostAuthorize： 在目标方法执行之后进行权限校验。
+@PostFilter： 在目标方法执行之后对方法的返回结果进行过滤。
+@PreAuthorize： 在目标方法执行之前进行权限校验。
+@PreFilter： 在目标方法执行之前对方法参数进行过滤。
+@secured： 访问目标方法必须具备相应的角色。
+@DenyAll： 拒绝所有访问。
+@PermitAll： 允许所有访问。
+@RolesAllowed： 访问目标方法必须具备相应的角色。
+```
+
+
+
 ### 记住我
 
 即登录之后在一定期限内免登录。
@@ -641,10 +1104,6 @@ public void test() {
 
 ### 防止同时在线
 
-### 踢下线功能
-
-#### 10.1 核心代码
-
 配置类中增加session相关配置：
 
 ```java
@@ -679,6 +1138,27 @@ public void test() {
 ```
 
 不同地方同时登录会被顶掉。
+
+### 认证常规配置
+
+```
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.formLogin()
+                .and()
+                .authorizeRequests()
+                .antMatchers("/test/register", "/test/login").permitAll()
+                .anyRequest().authenticated()
+                .and().csrf().disable();
+    }
+```
+
+- 开启授权；
+- 登录、注册放行；
+- 开启认证；
+- 关闭csrf防护；
+
+
 
 ## 待定
 
@@ -2482,3 +2962,146 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
 ```
 
+
+
+
+
+
+
+
+
+
+
+在SpringSecurity框架中有三个非常核心的类和接口，分别是：
+
+- SecurityFilterChain接口；
+- FilterChainProxy类；
+- DelegatingFilterProxy类；
+
+这个三个接口和类的相互之间的步骤关系如下：
+
+1. 生成一个`FilterChainProxy`类型的对象，该类有一个**属性**`filterChains`，是SecurityFilterChain类型的List集合；该对象被spring容器通过bean管理，名称为 `springSecurityFilterChain`， 类型为`FilterChainProxy`。
+
+    底层通过`FilterChainProxy`代理去调用各种Filter(Filter链)，`Filter`通过调用`AuthenticationManager`完成认证 ，通过调用`AccessDecisionManager`完成授权。
+
+    ```java
+    // SecurityFilterChain
+    public interface SecurityFilterChain {
+        boolean matches(HttpServletRequest request);
+    
+        List<Filter> getFilters();
+    }
+    
+    // FilterChainProxy
+    public class FilterChainProxy extends GenericFilterBean {
+        private List<SecurityFilterChain> filterChains;
+    }
+    ```
+
+2. 生成一个DelegatingFilterProxy类型的对象，将名为springSecurityFilterChain的bean（上面的）作为`DelegatingFilterProxy`类对象的**属性targetBeanName的值**，供后面请求时获取bean。这样`FilterChainProxy`类型的对象就被`DelegatingFilterProxy`类型的对象委托管理了。
+
+    注意：DelegatingFilterProxy对象的生成是tomcat启动过程中会调用所有继承了RegistrationBean类的onStartUp方法，最终调用了实现类中的addRegistration方法。
+
+3. 前端发起请求时，调用了DelegatingFilterProxy类型的拦截器执行doFilter方法。doFilter方法获取被委托的对象FilterChainProxy并调用其doFilter方法（即FilterChainProxy的doFilter方法），执行获取到的所有的拦截器然后再获取代理对象执行容器加载时保存的拦截器再执行。
+
+-------------------------------**第一步**-------------------------------
+
+**生成一个FilterChainProxy类型的对象**
+
+![image-20231225134414405](typora文档图片/image-20231225134414405.png)
+
+可以看到请求访问时，`DelegatingFilterProxy`管理`FilterChainProxy`，`FilterChainProxy`里调用`SecurityFilterChain`类型的过滤器。
+
+[Java SPI 机制](https://blog.csdn.net/qq_37967783/article/details/131505676)
+
+Spring的Factories就是Spring版本的Java Spi，我在关于java基础系列文章中有详细介绍Java SPI机制。 Spring Factories的最重要的功能就是：可以通过配置文件指定Spring容器加载一些特定的组件。
+
+Spring Factories是一种类似于Java SPI的机制，它在META-INF/spring.factories文件中配置接口的实现类名称，然后在程序中读取这些配置文件并实例化。
+
+在springboot启动过程中会获取spring.factories配置文件里的配置类并加载到spring容器中，观察spring.factories配置文件里的配置内容，涉及到springsecurity的如下图红框处所示。
+
+![image-20231225170234268](typora文档图片/image-20231225170234268.png)
+
+先看 `SecurityAutoConfiguration` 和 `SecurityFilterAutoConfiguration` 这两个配置类：
+
+![image-20231225170325342](typora文档图片/image-20231225170325342.png)
+
+**配置类是如何获取到 springSecurityFilterChain这个bean的**
+
+分析`SecurityAutoConfiguration`配置类：
+
+```java
+@Configuration(
+    proxyBeanMethods = false
+)
+@ConditionalOnClass({DefaultAuthenticationEventPublisher.class})
+@EnableConfigurationProperties({SecurityProperties.class})
+@Import({SpringBootWebSecurityConfiguration.class, WebSecurityEnablerConfiguration.class, SecurityDataConfiguration.class, ErrorPageSecurityFilterConfiguration.class})
+public class SecurityAutoConfiguration {
+    public SecurityAutoConfiguration() {
+    }
+
+    @Bean
+    @ConditionalOnMissingBean({AuthenticationEventPublisher.class})
+    public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
+        return new DefaultAuthenticationEventPublisher(publisher);
+    }
+}
+```
+
+该配置类里导入的四个配置类：
+
+- SpringBootWebSecurityConfiguration.class：作用是WebSecurityConfigurerAdapter 类存在但是bean对象不存在时注册默认的WebSecurityConfigurerAdapter 类型是DefaultConfigurerAdapter的bean。
+
+    ```java
+    @Configuration(
+        proxyBeanMethods = false
+    )
+    @ConditionalOnDefaultWebSecurity
+    @ConditionalOnWebApplication(
+        type = Type.SERVLET
+    )
+    class SpringBootWebSecurityConfiguration {
+        SpringBootWebSecurityConfiguration() {
+        }
+    
+        @Bean
+        @Order(2147483642)
+        SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+            ((HttpSecurity)((HttpSecurity)((ExpressionUrlAuthorizationConfigurer.AuthorizedUrl)http.authorizeRequests().anyRequest()).authenticated().and()).formLogin().and()).httpBasic();
+            return (SecurityFilterChain)http.build();
+        }
+    }
+    ```
+
+    
+
+- WebSecurityEnablerConfiguration.class：
+
+    该类文件如下，可以看到其中声明了@EnableWebSecurity注解：
+
+    ```java
+    @Configuration(
+        proxyBeanMethods = false
+    )
+    // 只有当BeanFactory中没有指定的bean的时候才能匹配，主要是用来做自动配置的，当程序没有配置指定的类的时候，就会使用默认配置
+    @ConditionalOnMissingBean(
+     
+       name = {"springSecurityFilterChain"}
+    )
+    @ConditionalOnClass({EnableWebSecurity.class})
+    @ConditionalOnWebApplication(
+        type = Type.SERVLET
+    )
+    @EnableWebSecurity
+    class WebSecurityEnablerConfiguration {
+        WebSecurityEnablerConfiguration() {
+        }
+    }
+    ```
+
+    
+
+- SecurityDataConfiguration.class：
+
+- ErrorPageSecurityFilterConfiguration.class
