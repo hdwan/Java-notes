@@ -2276,6 +2276,140 @@ http.formLogin()  // 表示采用form表单认证
 
 这里展示**基于数据库实现权限认证**。
 
+1. 配置文件里设置访问权限
+
+    ```java
+    public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    
+        @Bean
+        public PasswordEncoder password() {
+            return new BCryptPasswordEncoder();
+        }
+    
+        @Override
+        protected void configure(HttpSecurity http) throws Exception {
+            http.formLogin()
+                    .and()
+                    .authorizeRequests()
+                    .antMatchers("/login").permitAll()
+                -------
+                    .antMatchers("/test/test").hasRole("admin") // 路径具有角色 admin才能访问
+                -------
+                    .anyRequest()
+                    .authenticated();
+        }
+    }
+    ```
+
+2. 实现 `UserDetailsService`
+
+    ```java
+    @Service
+    public class UsersServiceImpl implements UserDetailsService {
+    
+        @Autowired
+        private UserInfoMapper userInfoMapper;
+        @Autowired
+        private UserMapper userMapper;
+    
+        @Override
+        public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+            System.out.println("这里--UsersServiceImpl");
+            User user = userMapper.selectByUsername(username);
+            List<Role> roleList = userInfoMapper.selectRoleByUserId(user.getId());
+            System.out.println(roleList);
+            List<GrantedAuthority> grantedAuthorityList = new ArrayList<>();
+            for (Role role : roleList) {
+                SimpleGrantedAuthority simpleGrantedAuthority = new SimpleGrantedAuthority("ROLE_" + role.getName());
+                grantedAuthorityList.add(simpleGrantedAuthority);
+            }
+            return new org.springframework.security.core.userdetails.User(username, user.getPassword(), grantedAuthorityList);
+        }
+    }
+    ```
+
+    注意：这里返回的是默认提供的User对象，或者自己实现一个继承`UserDetails`的类，实现构造函数（用户名、密码、角色权限list）
+
+3. 数据库表设计
+
+    角色表：
+
+    ![image-20240107195125031](typora文档图片/image-20240107195125031.png)
+
+    用户表：
+
+    ![image-20240107195138141](typora文档图片/image-20240107195138141.png)
+
+4. 最后进行测试即可。
+
+此外，也可以使用注解在对应的controller层方法上添加角色限制。
+
+**使用注解先要开启注解功能**：`@EnableGlobalMethodSecurity(securedEnabled=true)`
+
+
+
+## 记住我
+
+### 保持登录
+
+设置登录有效期，一定期限内不需要重复登录
+
+1. 配置文件
+
+    ```java
+    @Configuration
+    public class BrowserSecurityConfig {
+    
+        @Autowired
+        private DataSource dataSource;
+        @Bean
+        public PersistentTokenRepository persistentTokenRepository() {
+            JdbcTokenRepositoryImpl jdbcTokenRepository = new JdbcTokenRepositoryImpl();
+            // 赋值数据源
+            jdbcTokenRepository.setDataSource(dataSource);
+            // 自动创建表,第一次执行会创建，以后要执行就要删除掉！
+            // jdbcTokenRepository.setCreateTableOnStartup(true);
+            return jdbcTokenRepository;
+        }
+    }
+    ```
+
+2. 更改安全配置类
+
+    `configure(HttpSecurity http)` 方法中：
+
+    ```
+        @Autowired
+        private UsersServiceImpl usersService;
+        @Autowired
+        private PersistentTokenRepository tokenRepository;
+    
+    
+    http.rememberMe()
+                    .tokenValiditySeconds(100) // 设置有效期 单位是 秒
+                    .tokenRepository(tokenRepository)
+                    .userDetailsService(usersService);
+    ```
+
+    **注意登录有效期的设置**。
+
+3. 运行后发现，登录页面有变化：
+
+    ![image-20240107202003583](typora文档图片/image-20240107202003583.png)
+
+    多了 `记住我`。
+
+### 注销
+
+在配置类中添加退出映射地址：
+
+```java
+http.logout()
+    .logoutUrl("/logout") // 退出地址（接口）
+```
+
+访问这个接口会自动退出。
+
 
 
 ## 认证方式
@@ -2286,5 +2420,299 @@ formlogin等等
 
 
 
+## CSRF
 
+Cross-site request forgery，跨站请求伪造，也被称为 one-click  attack 或者 session riding，通常缩写为 CSRF 或者 XSRF， 是一种挟制用户在当前已登录的 Web 应用程序上执行非本意的操作的攻击方法。跟跨网站脚本（XSS）相比，XSS 利用的是用户对指定网站的信任，CSRF 利用的是网站对用户网页浏览器的信任。
 
+跨站请求攻击，简单地说，是攻击者通过一些技术手段欺骗用户的浏览器去访问一个自己曾经认证过的网站并运行一些操作（如发邮件，发消息，甚至财产操作如转账和购买商品）。由于浏览器曾经认证过，所以被访问的网站会认为是真正的用户操作而去运行。这利用了 web 中用户身份验证的一个漏洞：**简单的身份验证只能保证请求发自某个用户的浏览器，却不能保证请求本身是用户自愿发出的。**
+
+从 Spring Security 4.0 开始，默认情况下会启用。
+
+### Spring Security 实现 CSRF 的原理
+
+接口 **`CsrfToken`**：
+
+```java
+public interface CsrfToken extends Serializable {
+
+	String getHeaderName();
+	String getParameterName();
+	String getToken();
+}
+```
+
+![image-20240107210238940](typora文档图片/image-20240107210238940.png)
+
+该接口有两个实现类：`SaveOnAccessCsrfToken` 和  `DefaultCsrfToken` 。
+
+`SaveOnAccessCsrfToken` 是位于 `LazyCsrfTokenRepository` 类内部的静态常量（final）内部类：
+
+```java
+public final class LazyCsrfTokenRepository implements CsrfTokenRepository {
+	......
+		private static final class SaveOnAccessCsrfToken implements CsrfToken {
+            ......
+        }
+    .....
+}
+```
+
+`SaveOnAccessCsrfToken `源码:
+
+注意：`transient` 作用： 一旦类的某个成员变量被transient修饰,该变量将不再是对象持久化的一部分,即无法被序列化和反序列化。
+
+```java
+	private static final class SaveOnAccessCsrfToken implements CsrfToken {
+
+		private transient CsrfTokenRepository tokenRepository;
+
+		private transient HttpServletRequest request;
+
+		private transient HttpServletResponse response;
+
+		private final CsrfToken delegate;
+
+		SaveOnAccessCsrfToken(CsrfTokenRepository tokenRepository, HttpServletRequest request,
+				HttpServletResponse response, CsrfToken delegate) {
+			this.tokenRepository = tokenRepository;
+			this.request = request;
+			this.response = response;
+			this.delegate = delegate;
+		}
+
+		@Override
+		public String getHeaderName() {
+			return this.delegate.getHeaderName();
+		}
+
+		@Override
+		public String getParameterName() {
+			return this.delegate.getParameterName();
+		}
+
+		@Override
+		public String getToken() {
+			saveTokenIfNecessary();
+			return this.delegate.getToken();
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj) {
+				return true;
+			}
+			if (obj == null || getClass() != obj.getClass()) {
+				return false;
+			}
+			SaveOnAccessCsrfToken other = (SaveOnAccessCsrfToken) obj;
+			if (this.delegate == null) {
+				if (other.delegate != null) {
+					return false;
+				}
+			}
+			else if (!this.delegate.equals(other.delegate)) {
+				return false;
+			}
+			return true;
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((this.delegate == null) ? 0 : this.delegate.hashCode());
+			return result;
+		}
+
+		@Override
+		public String toString() {
+			return "SaveOnAccessCsrfToken [delegate=" + this.delegate + "]";
+		}
+
+		private void saveTokenIfNecessary() {
+			if (this.tokenRepository == null) {
+				return;
+			}
+			synchronized (this) {
+				if (this.tokenRepository != null) {
+					this.tokenRepository.saveToken(this.delegate, this.request, this.response);
+					this.tokenRepository = null;
+					this.request = null;
+					this.response = null;
+				}
+			}
+		}
+
+	}
+
+}
+```
+
+`SaveOnAccessCsrfToken` 里有一个属性是接口 `CsrfTokenRepository` 类型：
+
+```java
+public interface CsrfTokenRepository {
+	CsrfToken generateToken(HttpServletRequest request);
+	void saveToken(CsrfToken token, HttpServletRequest request, HttpServletResponse response);
+	CsrfToken loadToken(HttpServletRequest request);
+}
+```
+
+该接口的实现类：
+
+![image-20240107211444428](typora文档图片/image-20240107211444428.png)
+
+红线表示内部实现类，即上面说的 `SaveOnAccessCsrfToken`。
+
+看 `CookieCsrfTokenRepository`：
+
+```java
+public final class CookieCsrfTokenRepository implements CsrfTokenRepository {
+
+	static final String DEFAULT_CSRF_COOKIE_NAME = "XSRF-TOKEN";
+
+	static final String DEFAULT_CSRF_PARAMETER_NAME = "_csrf";
+
+	static final String DEFAULT_CSRF_HEADER_NAME = "X-XSRF-TOKEN";
+
+	private String parameterName = DEFAULT_CSRF_PARAMETER_NAME;
+
+	private String headerName = DEFAULT_CSRF_HEADER_NAME;
+
+	private String cookieName = DEFAULT_CSRF_COOKIE_NAME;
+
+	private boolean cookieHttpOnly = true;
+
+	private String cookiePath;
+
+	private String cookieDomain;
+
+	private Boolean secure;
+
+	private int cookieMaxAge = -1;
+
+	public CookieCsrfTokenRepository() {
+	}
+
+	@Override
+	public CsrfToken generateToken(HttpServletRequest request) {
+		return new DefaultCsrfToken(this.headerName, this.parameterName, createNewToken());
+	}
+    。。。。
+	private String createNewToken() {
+		return UUID.randomUUID().toString();
+	}
+    。。。。
+}        
+```
+
+根据类的属性 `DEFAULT_CSRF_PARAMETER_NAME` 可以发现默认的 CSRF 参数名为 `_csrf`。
+
+`generateToken` 返回 `CsrfToken`，用的是`CsrfToken` 的实现类 `DefaultCsrfToken`。
+
+生成csrfToken 保存到 HttpSession 或者 Cookie 中。
+
+请求到来时，从请求中提取 csrfToken，和保存的 csrfToken 做比较，进而判断当前请求是否合法。主要通过 CsrfFilter 过滤器来完成。
+
+## SpringSecurity 微服务权限方案
+
+微服务架构风格是一种使用一套小服务来开发单个应用的方式途径，每个服务运行在自己的进程中，并使用轻量级机制通信，通常是 HTTP API，这些服务基于业务能力构建，并能够通过自动化部署机制来独立部署，这些服务使用不同的编程语言实现，以及不同数据存储技术，并保持最低限度的集中式管理。
+
+**微服务优势**
+
+1. 微服务每个模块就相当于一个单独的项目，代码量明显减少，遇到问题也相对来说比 较好解决。
+2. 微服务每个模块都可以使用不同的存储方式（比如有的用 redis，有的用 mysql 等），数据库也是单个模块对应自己的数据库。
+3. 微服务每个模块都可以使用不同的开发技术，开发模式更灵活。
+
+**微服务本质**
+
+1. 微服务，关键其实不仅仅是微服务本身，而是系统要提供一套基础的架构，这种架构 使得微服务可以独立的部署、运行、升级，不仅如此，这个系统架构还让微服务与微服务 之间在结构上“松耦合”，而在功能上则表现为一个统一的整体。这种所谓的“统一的整 体”表现出来的是统一风格的界面，统一的权限管理，统一的安全策略，统一的上线过 程，统一的日志和审计方法，统一的调度方式，统一的访问入口等等。
+2. 微服务的目的是有效的拆分应用，实现敏捷开发和部署。
+
+### 微服务认证与授权实现思路
+
+#### 认证授权过程分析
+
+1. 如果是基于 Session，那么 Spring-security 会对 cookie 里的 sessionid 进行解析，找到服务器存储的 session 信息，然后判断当前用户是否符合请求的要求。
+
+2. 如果是 token，则是解析出 token，然后将当前请求加入到 Spring-security 管理的权限信息中去
+
+    ![image-20240107214848650](typora文档图片/image-20240107214848650.png)
+
+如果系统的模块众多，每个模块都需要进行授权与认证，所以我们选择基于 token 的形式进行授权与认证，用户根据用户名密码认证成功，然后获取当前用户角色的一系列权限值，并以用户名为 key，权限列表为 value 的形式存入 redis 缓存中，根据用户名相关信息生成 token 返回，浏览器将 token 记录到 cookie 中，每次调用 api 接口都默认将 token 携带到 header 请求头中，Spring-security 解析 header 头获取 token 信息，解析 token 获取当前用户名，根据用户名就可以从 redis 中获取权限列表，这样 Spring-security 就能够判断当前请求是否有权限访问。
+
+#### 用户权限与与角色
+
+一般用三个表：用户表、权限（角色）表、用户和权限一一对应的表。
+
+## jwt介绍
+
+### 访问令牌的类型
+
+![image-20240107215620076](typora文档图片/image-20240107215620076.png)
+
+### JWT组成
+
+![image-20240107215948356](typora文档图片/image-20240107215948356.png)
+
+该对象为一个很长的字符串，字符之间通过"."分隔符分为三个子串。
+
+每一个子串表示了一个功能块，总共有以下**三个部分**：JWT 头、有效载荷和签名
+
+#### JWT 头
+
+JWT 头部分是一个描述 JWT 元数据的 JSON 对象，通常如下所示：
+
+```json
+{
+    "alg":"HS256",
+    "typ": "JWT"
+}
+```
+
+`alg` 属性表示签名使用的算法，默认为 HMAC SHA256（写为 HS256）； 
+
+`typ` 属性表示令牌的类型，JWT 令牌统一写为 JWT。最后，使用 Base64 URL 算法将上述 JSON 对象转换为字符串保存。
+
+#### 有效载荷
+
+有效载荷部分，是 JWT 的主体内容部分，也是一个 JSON 对象，包含需要传递的数据。 JWT 指定七个默认字段供选择。
+
+iss：发行人；
+
+exp：到期时间；
+
+sub：主题；
+
+aud：用户；
+
+nbf：在此之前不可用；
+
+iat：发布时间；
+
+jti：JWT ID 用于标识该 JWT；
+
+除以上默认字段外，我们还可以自定义私有字段，如：
+
+```json
+{
+"name": "Helen",
+"admin": true
+}
+```
+
+**注意**：默认情况下 JWT 是未加密的，任何人都可以解读其内容，因此不要构建隐私信息字段，存放保密信息，以防止信息泄露。 JSON 对象也使用 Base64 URL 算法转换为字符串保存。
+
+签名哈希部分是对上面两部分数据签名，通过指定的算法生成哈希，以确保数据不会被篡改。
+
+首先，需要指定一个密码（secret）。该密码仅仅为保存在服务器中，并且不能向用户公开。然后，使用标头中指定的签名算法（默认情况下为 HMAC SHA256）根据以下公式生成签名。
+
+HMACSHA256(base64UrlEncode(header) + "." + base64UrlEncode(claims), secret) 
+
+在计算出签名哈希后，JWT 头，有效载荷和签名哈希的三个部分组合成一个字符串，每个部分用"."分隔，就构成整个 JWT 对象。
+
+**Base64URL 算法**
+
+JWT 头和有效载荷序列化的算法都用到了 Base64URL。该算法和常见 Base64 算 法类似，稍有差别。
+
+作为令牌的 JWT 可以放在 URL 中（例如 api.example/?token=xxx）。 Base64 中用的三个字符是"+"，"/"和"="，由于在 URL 中有特殊含义，因此 Base64URL 中对他们做了替换： "="去掉，"+"用"-"替换，"/"用"_"替换，这就是 Base64URL 算法。
