@@ -506,7 +506,7 @@ public class DelegatingPasswordEncoder implements PasswordEncoder {
 
 传入**原始密码和遵循 `{idForEncode}encodePassword` 规则的密码编码串**。通过获取编码方式id ( idForEncode ) 来从 DelegatingPasswordEncoder 中的映射集合 idToPasswordEncoder 中获取具体的 PasswordEncoder 实现类进行匹配校验。找不到就使用默认的`defaultPasswordEncoderForMatches`方法生成的属性 `UnmappedIdPasswordEncoder`。
 
-#### 密码器静态工厂PasswordEncoderFactories
+#### 密码器静态工厂 PasswordEncoderFactories
 
 DelegatingPasswordEncoder 在哪实例化的？
 
@@ -626,10 +626,6 @@ $2a$10$/bTVvqqlH9UiE0ZJZ7N2Me3RIgUCdgMheyTgV0B4cMCSokPa.6oCa
 
 - 慢，难以破解。
 - 同样的密码每次使用 bcrypt 编码，密码暗文都是不一样的。
-
-
-
-
 
 
 
@@ -820,7 +816,7 @@ spring:
             if (user == null) { // 排除用户不存在异常
                 throw new UsernameNotFoundException("用户不存在");
             }
-    
+            // 三个参数分别是 用户名 密码 用户权限
             return new org.springframework.security.core.userdetails.User(
                     user.getUsername(),
                     user.getPassword(),
@@ -849,8 +845,6 @@ spring:
 1. 系统默认提供一个登录页面和登录接口。
 
 2. 密码校验是由SpringSecurity内部完成。不需要我们来处理。我们只需要**将数据库查出来的用户名和密码交给spring security提供的User类即可**。即service层里的`loadUserByUsername`方法返回值。
-
-
 
 #### 自定义登录页面
 
@@ -1026,2059 +1020,104 @@ public void test() {
 @RolesAllowed： 访问目标方法必须具备相应的角色。
 ```
 
+## Spring Security 自动配置
 
+springboot的自动配置都在 `spring-boot-autoconfigure-版本号` 下。
 
-### 记住我
+### Spring Boot 下 Spring Security 的自动配置
 
-即登录之后在一定期限内免登录。
+![image-20231225170325342](typora文档图片/image-20231225170325342.png)
 
-正常而言，关闭浏览器后，默认cookie会消失。但是如果设置了记住我，那么它会生成一个**叫remember me的cookie**，这个cookie包含了用户信息，且不会消失，直到设置的过期时间到了才会消失。
+`org.springframework.boot.autoconfigure.security.servlet` 中找到Spring Security 关于 Servlet 的自动配置类。
 
-因此我们关闭后，再次请求，它会带着这个rememberme（就是token）到数据库中查询。
+#### SecurityAutoConfiguration
 
-**修改配置文件**
-
-或者新建配置文件
-
-```java
-    /**
-      * 自动登录 配置类中，注入数据源和配置操作数据库对象
-      */
-     //注入数据源
-     @Autowired
-     private DataSource dataSource;
- 
-     //注入操作数据库的对象JdbcTokenRepositoryImpl,用它来创建token
-     // 当然最好选择返回上层接口。我们一般是这样的，因为多态方便后续修改维护。
-     @Bean
-     public PersistentTokenRepository persistentTokenRepository(){
-         JdbcTokenRepositoryImpl jdbcTokenRepository = new JdbcTokenRepositoryImpl();
-         //  赋值数据源
-         jdbcTokenRepository.setDataSource(dataSource);
-         //  自动创建表 , 第一次执行会创建，以后要执行就要删除掉！
-         //jdbcTokenRepository.setCreateTableOnStartup(true);//这里我们是自己创建的数据库。所以不要这句
-         return jdbcTokenRepository;
-     }
- 
- 
- 
- 	@Override
-     protected void configure(HttpSecurity http) throws Exception {
-         ......
-          .and()
-          .rememberMe()//开启记住我功能
-          .tokenRepository(persistentTokenRepository())//把操作数据库对象传进来
-          .tokenValiditySeconds(60)//表示自动登录，60s内有效
-          .userDetailsService(userDetailsService)//查询数据库的service
-         ......
-     }
-```
-
-`tokenValiditySeconds`设置有效时间：以 `秒` 为单位，如一天表示：60\*60\*24
-
-### 关闭安全认证
-
-更改启动类的注解：
+先来看`SecurityAutoConfiguration`：
 
 ```java
-@SpringBootApplication(exclude = {SecurityAutoConfiguration.class})
-```
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnClass(DefaultAuthenticationEventPublisher.class)
+@EnableConfigurationProperties(SecurityProperties.class)
+@Import({ SpringBootWebSecurityConfiguration.class, WebSecurityEnablerConfiguration.class,
+		SecurityDataConfiguration.class, ErrorPageSecurityFilterConfiguration.class })
+public class SecurityAutoConfiguration {
+
+	@Bean
+	@ConditionalOnMissingBean(AuthenticationEventPublisher.class)
+	public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
+		return new DefaultAuthenticationEventPublisher(publisher);
+	}
 
-### CSRF功能
-
-前面配置文件中：
-
-![image-20231226105714077](typora文档图片/image-20231226105714077.png)
-
-跨站请求伪造（Cross-site request forgery）。
-
-跨站请求位置默认开启。针对 PATCH，POST，PUT 和 DELETE 方法进行防护。
-
-想要实现该功能，只需要在配置类中开启CSRF的情况下，在前端中设置如下：
-
-```html
-<input type="hidden"th:if="${_csrf}!=null"th:value="${_csrf.token}"name="_csrf"/>
-```
-
-一般测试的时候，免得在前端还要加上这个代码。都选择关闭CSRF功能。如果不关闭，那么在前端表单登录的代码中一定要加上上面这段。否则自己写的登录页面（属于跨站），POST提交就会被进行防护。
-
-### 防止同时在线
-
-配置类中增加session相关配置：
-
-```java
-        //踢下线配置
-        http.sessionManagement()
-                .maximumSessions(1) // 表示同一个用户最大登录客户端的数量为1
-                .maxSessionsPreventsLogin(false) // 阻止登录策略，如果为true，表示已经登录就不允许在别的地方登录了。如果为false，则表示在其他地方登录后，就会踢出之前其他地方登录的该账号。
-                .expiredSessionStrategy(new SessionInformationExpiredStrategy() {
-                    // 方法一：页面跳转的方式处理
-                    //private RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
-                    // 当发现session超时，或者session被踢下线之后，要进行的处理
-                    //@Override
-                    //public void onExpiredSessionDetected(SessionInformationExpiredEvent event) throws IOException, ServletException {
-                    //    redirectStrategy.sendRedirect(event.getRequest(),event.getResponse(),"/forced");
-                    //}
- 
-                    // 方法二：前后端分离的情况下，一般是返回json数据
-                    // 可以使用springboot默认的jackson的json处理对象，当然你也可以使用其他json工具
-                    private ObjectMapper objectMapper = new ObjectMapper();
-                    @Override
-                    public void onExpiredSessionDetected(SessionInformationExpiredEvent event) throws IOException, ServletException {
- 
-                        Map<String, Object> map = new HashMap<>();
-                        map.put("code",50009);
-                        map.put("data",null);
-                        map.put("msg","您已在其他地方进行了登录，请核实是否为本人操作!");
-                        String json = objectMapper.writeValueAsString(map);
-                        event.getResponse().setContentType("application/json;charset=utf-8");
-                        event.getResponse().getWriter().write(json);
-                    }
-                });
-```
-
-不同地方同时登录会被顶掉。
-
-### 认证常规配置
-
-```
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http.formLogin()
-                .and()
-                .authorizeRequests()
-                .antMatchers("/test/register", "/test/login").permitAll()
-                .anyRequest().authenticated()
-                .and().csrf().disable();
-    }
-```
-
-- 开启授权；
-- 登录、注册放行；
-- 开启认证；
-- 关闭csrf防护；
-
-
-
-## 待定
-
-###  过滤器链
-
-从上到下
-
-- `WebAsyncManagerIntegrationFilter`：将SecurityContext集成到Spring MVC中用于管理异步请求处理的WebAsyncManager中。
-- `SecurityContextPersistenceFilter`：在当前会话中填充SecurityContext，SecurityContext即Security的上下文对象，里面包含了当前用户的认证及权限信息等。
-- `HeaderWriterFilter`：向请求的Header中添加信息
-- `CsrfFilter`：用于防止CSRF（跨域请求伪造）攻击。Spring Security会对所有post请求验证是否包含系统生成的CSRF的信息，如果不包含则报错。
-- `LogoutFilter`：匹配URL为“/logout”的请求，清除认证信息，实现用户注销功能。
-- `UsernamePasswordAuthenticationFilter`：认证操作的过滤器，用于匹配URL为“/login”的POST请求做拦截，校验表单中的用户名和密码。
-- `DefaultLoginPageGeneratingFilter`：如果没有配置登陆页面，则生成默认的认证页面
-- `DefaultLogoutPageGeneratingFilter`：用于生成默认的退出页面
-- `BasicAuthenticationFilter`：用于Http基本认证，自动解析Http请求头中名为Authentication的内容，并获得内容中“basic”开头之后的信息。
-- `RequestCacheAwareFilter`：用于缓存HttpServletRequest
-- `SecurityContextHolderAwareRequestFilter`：用于封装ServletRequest，让ServletRequest具备更多功能。
-- `AnonymousAuthenticationFilter`：对于未登录情况下的处理，当SecurityContextHolder中认证信息为空，则会创建一个匿名用户存入到SecurityContextHolder中
-- `SessionManagementFilter`：限制同一用户开启多个会话
-- `ExceptionTranslationFilter`：异常过滤器，用来处理在认证授权过程中抛出异常。
-- `FilterSecurityInterceptor`：获取授权信息，根据SecurityContextHolder中存储的用户信息判断用户是否有权限访问
-
-**核心过滤器**
-
-`FilterSecurityInterceptor`：是一个**方法级**的权限过滤器, 基本位于过滤链的最底部。
-
-`ExceptionTranslationFilter`：是个异常过滤器，用来处理在认证授权过程中抛出的异常。主要用于处理AuthenticationException（认证）和AccessDeniedException（授权）的异常
-
-`UsernamePasswordAuthenticationFilter` ：对/login 的 POST 请求做拦截，校验表单中用户名，密码。最常用的用户名和密码认证方式的主要处理类,构造了一个UsernamePasswordAuthenticationToken对象实现类。
-
-
-
-
-
-### 过滤器加载过程
-
-Springboot在整合Spring Security项目时会**自动配置DelegatingFilterProxy**过滤器，若非Springboot工程，则需要**手动配置**该过滤器。
-
-​    
-
-![springsecurity过滤器链](typora文档图片/springsecurity过滤器链.png)
-
-**过滤器如何进行加载的**：
-
-Security在**DelegatingFilterProxy**的doFilter()调用了initDelegat()方法，在该方法中调用了`WebApplicationContext`的getBean()方法，该方法触发FilterChainProxy的doFilterInternal方法，用于获取过滤链中的所有过滤器并进行加载。
-
-
-
-### 权限管理相关概念
-
-#### 认证
-
-`authentication`，权限管理系统确认一个主体的身份，允许主体进入系统。简单说就是“主体”证明自己是谁。笼统的认为就是以前所做的**登录操作**。
-
-#### 授权
-
-`authorization` 将操作系统的“权力”授予“主体”，这样主体就具备了操作系统中特定功能的能力。简单来说，授权就是给用户**分配权限**。
-
-#### 主体
-
-`principal` 使用系统的用户或设备或从其他系统远程登录的用户等等。简单说就是谁使用系统谁就是主体。
-
-**`认证`**和**`授权`** 是分开的，无论使用什么样的认证方式。都不会影响授权，这是两个独立的存在，这种独立带来的好处之一，就是可以非常方便地整合一些外部的解决方案。
-
-![image-20231224214814025](typora文档图片/image-20231224214814025.png)
-
-## 认证方式
-
-所谓的**认证**，就是用来判断系统中是否存在某用户，并判断该用户的身份是否合法的过程，解决的其实是用户登录的问题。认证的存在，是为了保护系统中的隐私数据与资源，只有合法的用户才可以访问系统中的资源。
-
-**认证方式**
-
-在Spring Security中，常见的认证方式可以分为HTTP层面和表单层面，常见的认证方式如下:
-
-- HTTP基本认证；
-
-- Form表单认证；
-
-- HTTP摘要认证；
-
-
-### 认证流程
-
-**认证流程**：
-
-`UsernamePasswordAuthenticationFilter`
-
-- 是最常用的用户名和密码认证方式的主要处理类,构造了一个UsernamePasswordAuthenticationToken对象实现类，将用请求信息封装为Authentication。
-
-`Authentication接口`
-
--  封装了用户相关信息。
-
-`AuthenticationManager接口`
-
-- 定义了认证Authentication的方法，是认证相关的核心接口，也是发起认证的出发点，因为在实际需求中，我们可能会允许用户使用用户名+密码登录，同时允许用户使用邮箱+密码，手机号码+密码登录，甚至，可能允许用户使用指纹登录，所以说AuthenticationManager一般不直接认证，AuthenticationManager接口的常用实现类ProviderManager 内部会维护一个List列表，存放多种认证方式，实际上这是委托者模式的应用（Delegate）。也就是说，核心的认证入口始终只有一个：AuthenticationManager
-
-AuthenticationManager，ProviderManager ，AuthenticationProvider…
-
-用户名+密码（UsernamePasswordAuthenticationToken），邮箱+密码，手机号码+密码登录则对应了三个AuthenticationProvider
-
-`DaoAuthenticationProvider`
-
-- 用于解析并认证 UsernamePasswordAuthenticationToken 的这样一个认证服务提供者,对应以上的几种登录方式。
-
-`UserDetailsService接口`
-
-- Spring Security 会将前端填写的username 传给 UserDetailService.loadByUserName方法。我们只需要从数据库中根据用户名查找到用户信息然后封装为UserDetails的实现类返回给SpringSecurity 即可，自己不需要进行密码的比对工作，密码比对交由SpringSecurity处理。
-
-`UserDetails接口`
-
-- 提供核心用户信息。通过UserDetailsService根据用户名获取处理的用户信息要封装成UserDetails对象返回。然后将这些信息封装到Authentication对象中。
-
-
-
-1. **在Spring Security中认证是由`AuthenticationManager`接口来负责的，接口定义为：**
-
-```java
-public interface AuthenticationManager {
-    Authentication authenticate(Authentication authentication) throws AuthenticationException;
-```
-
-- 返回 `Authentication` 表示认证成功；
-- 返回 `AuthenticationException` 异常，表示认证失败；
-
-AuthenticationManager 主要实现类为 ProviderManager，在 ProviderManager 中管理了众多 AuthenticationProvider 实例。在一次完整的认证流程中，Spring Security 允许存在多个 AuthenticationProvider ，用来实现多种认证方式，这些 AuthenticationProvider 都是由 ProviderManager 进行统一管理的。
-
-![image-20231224215130969](typora文档图片/image-20231224215130969.png)
-
-2. **Authentication**
-
-认证以及认证成功的信息主要是由 Authentication 的实现类进行保存的，其接口定义为：
-
-```java
-public interface Authentication extends Principal, Serializable {
-    Collection<? extends GrantedAuthority> getAuthorities();
-
-    Object getCredentials();
-
-    Object getDetails();
-
-    Object getPrincipal();
-
-    boolean isAuthenticated();
-
-    void setAuthenticated(boolean isAuthenticated) throws IllegalArgumentException;
 }
 ```
 
-- getAuthorities 获取用户权限信息；
-- getCredentials 获取用户凭证信息，一般指密码；
-- getDetails 获取用户详细信息；
-- getPrincipal 获取用户身份信息，用户名、用户对象等；
-- isAuthenticated 用户是否认证成功；
+该类是安全配置类（自动配置），该类引入（ @import ）了 `SpringBootWebSecurityConfiguration` 、 `WebSecurityEnablerConfiguration` 、`SecurityDataConfiguration` 和 `ErrorPageSecurityFilterConfiguration` 四个配置类，让这四个模块的类生效。是一个复合配置，是 Spring Security 自动配置最重要的一个类之一。Spring Boot 自动配置经常使用这种方式以达到灵活配置的目的，这也是我们研究 Spring Security 自动配置的一个重要入口。
 
-3. **SecurityContextHolder**
+~~同时 SecurityAutoConfiguration 还将 DefaultAuthenticationEventPublisher 作为默认的 AuthenticationEventPublisher 注入 Spring IoC 容器。~~不懂
 
-SecurityContextHolder 用来获取登录之后用户信息。Spring Security 会将登录用户数据保存在 Session 中。但是，为了使用方便,Spring Security在此基础上还做了一些改进，其中最主要的一个变化就是线程绑定。当用户登录成功后,Spring Security 会将登录成功的用户信息保存到 SecurityContextHolder 中。SecurityContextHolder 中的数据保存默认是通过ThreadLocal 来实现的，使用 ThreadLocal 创建的变量只能被当前线程访问，不能被其他线程访问和修改，也就是用户数据和请求线程绑定在一起。当登录请求处理完毕后，Spring Security 会将 SecurityContextHolder 中的数据拿出来保存到 Session 中，同时将 SecurityContexHolder 中的数据清空。以后每当有请求到来时，Spring Security 就会先从 Session 中取出用户登录数据，保存到 SecurityContextHolder 中，方便在该请求的后续处理过程中使用，同时在请求结束时将 SecurityContextHolder 中的数据拿出来保存到 Session 中，然后将 Security SecurityContextHolder 中的数据清空。这一策略非常方便用户在 Controller、Service 层以及任何代码中获取当前登录用户数据。
+接着看引入的四个配置类：
 
-### HTTP基本认证
+- `SpringBootWebSecurityConfiguration.class`：
 
-#### 简述
-
-HTTP基本认证是在RFC2616标准中定义的一种认证模式，它以一种很简单的方式与用户进行交互。HTTP基本认证可以分为如下4个步骤：
-
-- 客户端首先**发起一个未携带认证信息**的请求；
-
-- 然后**服务器端返回一个401 Unauthorized的响应信息**，并在**WWW-Authentication头部中说明认证形式**：当进行HTTP基本认证时，WWW-Authentication会被**设置为Basic realm=“被保护的页面”**；
-
-- 接下来**客户端会收到这个401 Unauthorized响应信息**，并弹出一个对话框，询问用户名和密码。当用户输入后，客户端会将**用户名和密码使用冒号进行拼接并用Base64编码**，然后将其放入到请求的Authorization头部并发送给服务器；
-
-- 最后服务器端对客户端发来的信息进行解码得到用户名和密码，并对该信息进行校验判断是否正确，最终给客户端返回响应内容。
-
-HTTP基本认证是一种无状态的认证方式，与表单认证相比，HTTP基本认证是一种基于HTTP层面的认证方式，无法携带Session信息，也就**无法实现Remember-Me**功能。另外，用户名和密码在传递时仅做了一次简单的Base64编码，几乎等同于以明文传输，极易被进行密码窃听和重放攻击。所以在实际开发中，很少会使用这种认证方式来进行安全校验。
-
-#### 代码实现
-
-**创建HttpSecurityConfig配置类**
-
-```java
-/**
- * 类功能描述：HTTP基本认证
- */
-@EnableWebSecurity
-public class HttpSecurityConfig extends WebSecurityConfigurerAdapter {
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        // super.configure(http);
-        http.authorizeRequests() // 认证配置
-                .anyRequest() // 任何请求
-                .authenticated() // 都需要身份验证
-                .and()
-                .httpBasic(); // http基本认证
-    }
-}
-```
-
-**控制层设置接口**
-
-```java
-@RestController
-@RequestMapping("/test")
-public class Test {
-
-    @GetMapping("/test")
-    public String test() {
-        System.out.println("收到请求");
-        return "success";
-    }
-}
-```
-
-**访问后端**
-
-在浏览器中输入：`http://localhost:8888/test/test`
-
-出现登录页面：
-
-![image-20231223220712578](typora文档图片/image-20231223220712578.png)
-
-用户名默认为：`user`，密码后端自动生成：
-
-![image-20231223220740532](typora文档图片/image-20231223220740532.png)
-
-
-
-**Basic认证**
-
-在未登录状态下访问目标资源时，查看响应头，可以看到`WWW-Authenticate`认证信息:WWW-Authenticate：Basic realm="Realm"，其中：
-
-WWW-Authenticate: 表示**服务器告知浏览器进行代理认证工作**。
-
-Basic: 表示认证类型为Basic认证。
-
-realm="Realm": 表示认证域名为Realm域。
-
-![image-20231224131516333](typora文档图片/image-20231224131516333.png)
-
-**认证过程**：
-
-根据401和以上响应头信息，浏览器会弹出一个对话框，要求输入用户名/密码，Basic认证会将其拼接成 “`用户名:密码`” 格式，中间是一个冒号，并利用Base64编码成加密字符串xxx；然后在请求头中附加 Authorization: Basic xxx 信息，发送给后台认证；后台需要利用Base64来进行解码xxx，得到用户名和密码，再校验 `用户名:密码` 信息。如果认证错误，浏览器会保持弹框；如果认证成功，浏览器会缓存有效的Base64编码，在之后的请求中，浏览器都会在请求头中添加该有效编码。
-
-### Form表单认证
-
-在SpringBoot开发环境中，**只要我们添加了Spring Security的依赖包，就会自动实现表单认证。**可以通过WebSecurityConfigurerAdapter提供的configure方法看到默认的认证方式就是表单认证，源码如下：
-
-```java
-    protected void configure(HttpSecurity http) throws Exception {
-        this.logger.debug("Using default configure(HttpSecurity). If subclassed this will potentially override subclass configure(HttpSecurity).");
-        http.authorizeRequests((requests) -> {
-            ((ExpressionUrlAuthorizationConfigurer.AuthorizedUrl)requests.anyRequest()).authenticated();
-        });
-        http.formLogin();
-        http.httpBasic();
-    }
-```
-
-#### 表单认证中的预置url和页面
-
-> 默认的formLogin配置中，自动配置了一些url和页面:
->
-> - **/login(get)**: get请求时会跳转到这个页面，只要我们**访问任意一个需要认证的请求时，都会跳转**到这个登录界面。
-> - **/login(post)**: post请求时会触发这个接口，在登录页面点击登录时，默认的登录页面表单中的action就是关联这个login接口。
-> - **/login?error**: 当用户名或密码错误时，会跳转到该页面。
-> - **/:** 登录成功后，默认跳转到该页面，如果配置了index.html页面，则 ”/“ 会重定向到index.html页面，当然这个页面要由我们自己实现。
-> - **/logout:** 注销页面。
-> - **/login?logout:** 注销成功后跳转到的页面。
->
-> 由此可见，SpringSecurity默认有两个login，即登录页面和登录接口的地址都是 /login:
->
-> - GET http://localhost:8080/login
-> - POST http://localhost:8080/login
->
-> 如果是 GET 请求，表示你想访问登录页面；如果是 POST 请求，表示你想提交登录数据。
-> 简单了解。
-
-#### 自定义认证
-
-```java
-package com.qf.my.ss.demo.config;
-
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.builders.WebSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-
-package com.springsecurity.config;
-
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.builders.WebSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-
-/**
- * 类功能描述：form表单认证
- */
-@EnableWebSecurity
-public class FormSecurityConfig extends WebSecurityConfigurerAdapter {
+    ```java
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnDefaultWebSecurity
+    @ConditionalOnWebApplication(type = Type.SERVLET)
+    class SpringBootWebSecurityConfiguration {
     
-    // 静态资源访问不走过滤器链 直接放行
-    @Override
-    public void configure(WebSecurity web) throws Exception {
-        web.ignoring().antMatchers("/js/**", "/cs/**", "/images/**");
-    }
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http.authorizeRequests()
+    	@Bean
+    	@Order(SecurityProperties.BASIC_AUTH_ORDER)
+    	SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+    		http
+                .authorizeRequests()
                 .anyRequest()
                 .authenticated()
                 .and()
                 .formLogin()
-                .loginPage("login.html")
-                .permitAll()
-                .defaultSuccessUrl("/main.html", true)
-                .loginProcessingUrl("/login") // 指登录成功后，是否始终跳转到登录成功url。它默认为false
-                .failureUrl("/error.html") // 用户密码错误跳转接口
-                .usernameParameter("username") // 要认证的用户参数名，默认username
-                .passwordParameter("password") // 要认证的密码参数名，默认password
                 .and()
-                .logout() // 配置注销
-                .logoutUrl("/logout") //注销接口
-                .logoutSuccessUrl("/login.html") // 注销成功后跳转到的接口
-                .permitAll()
-                .deleteCookies("myCookie") // 删除自定义的cookie
-                .and()
-                .csrf() // 注意:需禁用crsf防护功能,否则登录不成功
-                .disable();
+                .httpBasic();
+    		return http.build();
+    	}
+    
     }
-}
-
-```
-
-#### WebSecurity和HttpSecurity
-
-Spring Security内部是如何加载我们自定义的登录页面的？
-
-WebSecurity和HttpSecurity。
-
-- `WebSecurity`：
-
-    在这个类里定义了一个securityFilterChainBuilders集合，可以同时管理多个SecurityFilterChain过滤器链，当WebSecurity在执行时，会构建出一个名为 **”springSecurityFilterChain“** 的 **Spring BeanFilterChainProxy代理类**，它的作用是来 **定义哪些请求可以忽略安全控制，哪些请求必须接受安全控制**；以及在合适的时候 **清除SecurityContext** 以避免内存泄漏，同时也可以用来 **定义请求防火墙和请求拒绝处理器**，也可以在这里 **开启Spring Security 的Debug模式**。
-
-- `HttpSecurity`：
-
-    HttpSecurity用来构建包含一系列的过滤器链SecurityFilterChain，平常我们的配置就是围绕着这个SecurityFilterChain进行。
-
-### Http摘要认证
-
-#### **概念**
-
-HTTP摘要认证和HTTP基本认证一样，也是在RFC2616中定义的一种认证方式，它的出现是为了弥补HTTP基本认证存在的安全隐患，但该认证方式也并不是很安全。**HTTP摘要认证会使用对通信双方来说都可知的口令进行校验，且最终以密文的形式来传输数据，所以相对于基本认证来说，稍微安全了一些**。
-
-**HTTP摘要认证与基本认证类似，基于简单的“挑战-回应”模型。**当我们发起一个未经认证的请求时，服务器会返回一个401回应，并给客户端返回与验证相关的参数，期待客户端依据这些参数继续做出回应，从而完成整个验证过程。
-
-#### **摘要认证核心参数**
-
-服务端给客户端返回的验证相关参数如下：
-
-```
-username: 用户名。
-
-password: 用户密码。
-
-realm: 认证域，由服务器返回。
-
-opaque: 透传字符串，客户端应原样返回。
-
-method: 请求的方法。
-
-nonce: 由服务器生成的随机字符串，包含过期时间(默认过期时间300s)和密钥。
-
-nc: 即nonce-count,指请求的次数，用于计数，防止重放攻击。qop被指定时，nc也必须被指定。
-
-cnonce: 客户端发给服务器的随机字符串，qop被指定时，cnonce也必须被指定。
-
-qop: 保护级别，客户端根据此参数指定摘要算法。若取值为 auth,则只进行身份验证；若取值为auth-int，则还需要校验内容完整性，默认的qop为auth。
-
-uri: 请求的uri。
-
-response: 客户端根据算法算出的摘要值，这个算法取决于qop。
-
-algorithm: 摘要算法，目前仅支持MD5。
-
-entity-body: 页面实体，非消息实体，仅在auth-int中支持。
-```
-
-> 通常服务器端返回的数据包括realm、opaque、nonce、qop等字段，如果客户端需要做出验证回应，就必须按照一定的算法得到一些新的数据并一起返回。**在以上各种参数中，对服务器而言，最重要的字段是nonce；对客户端而言，最重要的字段是response。**
-
-#### 摘要认证实现
-
-```java
-package com.qf.my.spring.security.demo.config;
-
-import com.qf.my.spring.security.demo.service.MyUserDetailService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-import org.springframework.security.web.authentication.www.DigestAuthenticationEntryPoint;
-import org.springframework.security.web.authentication.www.DigestAuthenticationFilter;
-
-/**
- * 摘要认证的配置
- * @author Thor
- * @公众号 Java架构栈
- */
-@EnableWebSecurity
-public class DigestConfig extends WebSecurityConfigurerAdapter {
-
-    @Autowired
-    private DigestAuthenticationEntryPoint digestAuthenticationEntryPoint;
-
-    @Autowired
-    private MyUserDetailService userDetailService;
-
-    //配置认证入口端点，主要是设置认证参数信息
-    @Bean
-    public DigestAuthenticationEntryPoint digestAuthenticationEntryPoint(){
-        DigestAuthenticationEntryPoint point = new DigestAuthenticationEntryPoint();
-        point.setKey("security demo");
-        point.setRealmName("thor");
-        point.setNonceValiditySeconds(500);
-        return point;
-    }
-
-    public DigestAuthenticationFilter digestAuthenticationFilter(){
-        DigestAuthenticationFilter filter = new DigestAuthenticationFilter();
-        filter.setAuthenticationEntryPoint(digestAuthenticationEntryPoint);
-        filter.setUserDetailsService(userDetailService);
-        return filter;
-    }
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http.authorizeRequests()
-                .antMatchers("/hello").hasAuthority("role")
-                .anyRequest().authenticated()
-                .and().csrf().disable()
-                //当未认证时访问某些资源,则由该认证入口类来处理.
-                .exceptionHandling()
-                .authenticationEntryPoint(digestAuthenticationEntryPoint)
-                .and()
-                //添加自定义过滤器到过滤器链中
-                .addFilter(digestAuthenticationFilter());
-
-    }
-}
-
-```
-
-
-
-## 授权
-
-在 Spring Security 的授权体系中，有两个关键接口：
-
-1. AccessDecisionManager
-
-AccessDecisionManager (访问决策管理器)，用来决定此次访问是否被允许。
-
-```java
-public interface AccessDecisionManager {
-    void decide(Authentication authentication, Object object, Collection<ConfigAttribute> configAttributes) throws AccessDeniedException, InsufficientAuthenticationException;
-
-    boolean supports(ConfigAttribute attribute);
-
-    boolean supports(Class<?> clazz);
-}
-```
-
-2. AccessDecisionVoter
-
-AccessDecisionVoter (访问决定投票器)，投票器会检查用户是否具备应有的角色，进而投出赞成、反对或者弃权票。
-
-```java
-public interface AccessDecisionVoter<S> {
-    int ACCESS_GRANTED = 1;
-    int ACCESS_ABSTAIN = 0;
-    int ACCESS_DENIED = -1;
-
-    boolean supports(ConfigAttribute attribute);
-
-    boolean supports(Class<?> clazz);
-
-    int vote(Authentication authentication, S object, Collection<ConfigAttribute> attributes);
-}
-```
-
-3. ConfigAttribute
-
-ConfigAttribute，用来保存授权时的角色信息。
-
-```java
-public interface ConfigAttribute extends Serializable {
-    String getAttribute();
-}
-```
-
-在 Spring Security 中，用户请求一个资源(通常是一个接口或者一个 Java 方法)需要的角色会被封装成一个 ConfigAttribute 对象，在 ConfigAttribute 中只有一个 getAttribute方法，该方法返回一个 String 字符串，就是角色的名称。一般来说，角色名称都带有一个 ROLE_ 前缀，投票器 AccessDecisionVoter 所做的事情，其实就是比较用户所具各的角色和请求某个资源所需的 ConfigAtuibute 之间的关系。
-
-
-
-## 自定义用户名和密码
-
-### 基础
-
-当什么也没有配置的时候，账号和密码是由 Spring Security 定义生成的。而在实际项目中账号和密码都是从数据库中查询出来的。 所以要通过自定义逻辑控制认证逻辑。
-
-需要自定义逻辑时，只需要实现 UserDetailsService 接口即可。
-
-```java
-package org.springframework.security.core.userdetails;
-
-public interface UserDetailsService {
-    UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
-}
-```
-
-**返回值 UserDetails**
-
-```java
-public interface UserDetails extends Serializable {
-    Collection<? extends GrantedAuthority> getAuthorities(); // 表示获取登录用户所有权限
-    String getPassword(); // 表示获取密码
-    String getUsername(); // 表示获取用户名
-    boolean isAccountNonExpired(); // 表示判断账户是否过期
-    boolean isAccountNonLocked(); // 表示判断账户是否被锁定
-    boolean isCredentialsNonExpired(); // 表示凭证{密码}是否过期
-    boolean isEnabled(); // 表示当前用户是否可用
-}
-```
-
-该接口有三个实现类
-
-![image-20231224142058662](typora文档图片/image-20231224142058662.png)
-
-**使用的时候使用 User**。
-
-**密码加密**
-
-PasswordEncoder 接口
-
-```java
-public interface PasswordEncoder {
-    String encode(CharSequence rawPassword); // 表示把参数按照特定的解析规则进行解
-    boolean matches(CharSequence rawPassword, String encodedPassword);
-    // 表示验证从存储中获取的编码密码与编码后提交的原始密码是否匹配。如果密码匹配，则返回 true；如果不匹配，则返回 false。第一个参数表示需要被解析的密码。第二个参数表示存储的密码。
-    default boolean upgradeEncoding(String encodedPassword) {
-        return false;
-    }
-    // 表示如果解析的密码能够再次进行解析且达到更安全的结果则返回 true，否则返回false。默认返回 false。
-}
-```
-
-**实现类**
-
-![image-20231224143736234](typora文档图片/image-20231224143736234.png)
-
-`BCryptPasswordEncoder` 是 Spring Security 官方推荐的密码解析器，平时多使用这个解析器。 BCryptPasswordEncoder 是对 bcrypt 强散列方法的具体实现。是基于 Hash 算法实现的单向加密。可以通过 strength 控制加密强度，默认 10.
-
-**示例**
-
-```java
-@Test
-public void test01(){
-    // 创建密码解析器
-    BCryptPasswordEncoder bCryptPasswordEncoder = new BCryptPasswordEncoder();
-    // 对密码进行加密
-    String atguigu = bCryptPasswordEncoder.encode("atguigu");
-    // 打印加密之后的数据
-    System.out.println("加密之后数据：\t"+atguigu);
-    //判断原字符加密后和加密之前是否匹配
-    boolean result = bCryptPasswordEncoder.matches("atguigu", atguigu);
-    // 打印比较结果
-    System.out.println("比较结果：\t"+result);
-}
-
-```
-
-
-
-### SpringSecurity Web 权限方案
-
-#### 设置登录账号以及密码
-
-- 使用application.properties
-
-    ```properties
-    # 配置用户名
-    spring.security.user.name=root
-    # 配置密码
-    spring.security.user.password=123456
     ```
 
-- 编写类实现接口
+    通过源码可以知道，默认对所有请求进行认证。**这也是为什么在引入 Spring Security 中没有任何配置情况下，请求会被拦截的原因。**
+
+    该类引入了注解：`@ConditionalOnDefaultWebSecurity`，即默认的安全配置：
 
     ```java
-    @Configuration
-    public class SecurityConfig {
-        // 注入 PasswordEncoder 类到 spring 容器中
-        // 即向IOC容器里注入一个PasswordEncoder，用于生成密码的base64编码的字符串，和解析base64编码的字符串为实际密码内容。
-        @Bean
-        public PasswordEncoder passwordEncoder(){
-            return new BCryptPasswordEncoder();
-        }
+    // @ConditionalOnDefaultWebSecurity注解
+    @Target({ ElementType.TYPE, ElementType.METHOD })
+    @Retention(RetentionPolicy.RUNTIME)
+    @Documented
+    @Conditional(DefaultWebSecurityCondition.class)
+    public @interface ConditionalOnDefaultWebSecurity {
+    
     }
+    该注解包含了DefaultWebSecurityCondition类
+    class DefaultWebSecurityCondition extends AllNestedConditions {
     
+    	DefaultWebSecurityCondition() {
+    		super(ConfigurationPhase.REGISTER_BEAN);
+    	}
     
+    	@ConditionalOnClass({ SecurityFilterChain.class, HttpSecurity.class })
+    	static class Classes {
     
-    @Service
-    public class LoginService implements UserDetailsService {
-        @Override
-        public UserDetails loadUserByUsername(String username) throws 
-            UsernameNotFoundException {
-            // 判断用户名是否存在
-            if (!"admin".equals(username)){
-                throw new UsernameNotFoundException("用户名不存在！");
-            }
-            // 从数据库中获取的密码 atguigu 的密文
-            String pwd = "$2a$10$2R/M6iU3mCZt3ByG7kwYTeeW0w7/UqdeXrb27zkBIizBvAven0/na";
-            // 第三个参数表示权限
-            return new User(username,pwd,AuthorityUtils.commaSeparatedStringToAuthorityList("admin,"));
-        }
+    	}
+    
+    	@ConditionalOnMissingBean({ WebSecurityConfigurerAdapter.class, SecurityFilterChain.class })
+    	static class Beans {
+    
+    	}
+    
     }
     ```
 
-    
+    可以看出，生效的条件：存在 `SecurityFilterChain.class`, `HttpSecurity.class` 和  没有自定义 `WebSecurityConfigurerAdapter.class`, `SecurityFilterChain.class`。
 
-2.通过创建配置类实现设置
-
-> 将用户名和密码写在配置类里，虽然配置类中可以自己编写用户名和密码的代码，但因为它是配置类的缘故，不适合将从数据库中获取用户名和密码的业务代码写入到配置类中。
-
-```java
-@Configuration
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        //用于密码的密文处理
-        BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-        //生成密文
-        String password = passwordEncoder.encode("123456");
-        //设置用户名和密码
-        auth.inMemoryAuthentication().withUser("qfAdmin").password(password).roles("admin");
-    }
-  
-    @Bean
-    PasswordEncoder passwordEncoder(){
-        return new BCryptPasswordEncoder();
-    }
-}
-```
-
-3.编写自定义实现类（常用）
-
-- 设计数据库的用户表
-
-- 引入Mybatis和连接池的依赖
-
-```xml
-        <!--        mysql驱动-->
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-        </dependency>
-
-        <!--        druid连接-->
-        <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>druid-spring-boot-starter</artifactId>
-            <version>1.1.10</version>
-        </dependency>
-
-        <!--        mybatis-->
-        <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>1.3.2</version>
-        </dependency>
-```
-
-- 编写application.properties配置文件
-
-```properties
-# 指明mapper映射文件的位置
-mybatis.mapper-locations=classpath:mapper/*.xml
-# 配置连接池Druid
-spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
-spring.datasource.url=jdbc:mysql://localhost:3306/db_security?serverTimezone=Asia/Shanghai
-spring.datasource.username=root
-spring.datasource.password=123456
-spring.datasource.type=com.alibaba.druid.pool.DruidDataSource
-```
-
-- 编写UserDetailService实现类
-
-    从数据库中获取用户名和密码的业务
-
-```java
-@Service
-public class MyUserDetailService implements UserDetailsService {
-
-    @Autowired
-    private SysUserMapper userMapper;
-
-    @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        //设置角色
-        List<GrantedAuthority> auths = AuthorityUtils.commaSeparatedStringToAuthorityList("user");
-        //可以从数据库获取用户名和密码
-        if(StringUtils.isNullOrEmpty(username)){
-            return null;
-        }
-        SysUser sysUser = userMapper.selectByUsername(username);
-        User user = null;
-        if(Objects.nonNull(sysUser)){
-            user = new User(username,sysUser.getPassword(),auths);
-        }
-        return user;
-    }
-}
-
-```
-
-- 编写SecurityConfig配置类，指明对UserDetailsService实现类认证
-
-```java
-    @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
-    }
-```
-
-
-
-## 角色和权限
-
-### 概念
-
-所谓**权限**，就是用户是否有访问当前页面，或者是执行某个操作的权利。
-
-所谓**角色**，是对权限的汇总，比如“管理员”角色，可以对数据进行增删改查，增删改查是数据的四个权限，拥有“管理员”角色的用户拥有这四个权限。“普通用户”角色，只具备数据的增和查两种权限，那么拥有“普通用户”角色的用户只拥有这两个权限。
-
-Spring Security提供了四个方法用于角色和权限的访问控制。通过这些方法，对用户是否具有某个或某些权限，进行过滤访问。对用户是否具备某个或某些角色，进行过滤访问：
-
-- hasAuthority
-- hasAnyAuthority
-- hasRole
-- hasAnyRole
-
-### **hasAuthority方法**
-
-判断当前主体是否有指定的权限，有返回true，否则返回false。
-
-注意：该方法适用于只拥有一个权限的用户。
-
-在配置类中设置当前主体具有怎样的权限才能访问。
-
-示例
-
-![image-20231224145613020](typora文档图片/image-20231224145613020.png)
-
-```java
-@EnableWebSecurity
-public class PermissionConfig extends WebSecurityConfigurerAdapter {
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/nopermission.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/login") //登陆时访问的路径
-                .failureUrl("/error.html")//登陆失败的页面
-                .defaultSuccessUrl("/index.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                .antMatchers("/","/login").permitAll() //设置可以直接访问的路径，取消拦截
-                //1.hasAuthority方法：当前登陆用户，只有具有admin权限才可以访问这个路径
-                .antMatchers("/index.html").hasAuthority("26")
-                .anyRequest().authenticated()
-                .and().csrf().disable(); //关闭csrf防护
-    }
-
-    @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
-    }
-
-
-    @Bean
-    PasswordEncoder passwordEncoder(){
-        return new BCryptPasswordEncoder();
-    }
-}
-
-```
-
-- 从数据库查询权限的Service
-
-```java
-
-@Service
-public class PermissionServiceImpl implements PermissionService {
-
-    @Autowired
-    private SysRoleUserMapper roleUserMapper;
-
-    @Autowired
-    private SysRolePermissionMapper rolePermissionMapper;
-
-    @Autowired
-    private SysUserMapper userMapper;
-
-
-    @Override
-    public List<Integer> getPermissonsByName(String username) {
-
-        if(StringUtils.isNullOrEmpty(username)){
-            return null;
-        }
-        SysUser sysUser = userMapper.selectByUsername(username);
-        List<Integer> permissionIds = new ArrayList<>();
-        if(Objects.nonNull(sysUser)){
-            Integer id = sysUser.getId();
-            List<Integer> roleIds = roleUserMapper.selectByUserId(id);
-            if(!CollectionUtils.isEmpty(roleIds)){
-                //查询全选
-                roleIds.forEach(rid -> {
-                    List<Integer> pIds = rolePermissionMapper.selectByRoleId(rid);
-                    permissionIds.addAll(pIds);
-                });
-                //去重
-                Set<Integer> pSet = new HashSet<>(permissionIds);
-                permissionIds.clear();
-                permissionIds.addAll(pSet);
-
-            }
-        }
-        return permissionIds;
-    }
-}
-
-```
-
-- 在userdetailsService，为返回的User对象设置权限
-
-```java
-
-@Service
-public class MyUserDetailService implements UserDetailsService {
-
-    @Autowired
-    private SysUserMapper userMapper;
-
-    @Autowired
-    private PermissionService permissionService;
-
-
-    @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        if(StringUtils.isNullOrEmpty(username)){
-            return null;
-        }
-        //从数据库获得该用户相关的权限
-        List<Integer> permissons = permissionService.getPermissonsByName(username);
-        //设置权限
-        List<GrantedAuthority> auths = AuthorityUtils.commaSeparatedStringToAuthorityList(
-                permissons.stream().map(String::valueOf).collect(Collectors.joining(",")));
-        SysUser sysUser = userMapper.selectByUsername(username);
-        User user = null;
-        if(Objects.nonNull(sysUser)){
-            user = new User(username,sysUser.getPassword(),auths);
-        }
-        return user;
-    }
-}
-
-```
-
-### **hasAnyAuthority方法**
-
-适用于一个主体有多个权限的情况，多个权限用逗号隔开。
-
-如果当前的主体有任何提供的角色（给定的作为一个逗号分隔的字符串列表）的话，返回 true.
-
-```java
-
-
-@EnableWebSecurity
-public class PermissionConfig extends WebSecurityConfigurerAdapter {
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/nopermission.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/login") //登陆时访问的路径
-                .failureUrl("/error.html")//登陆失败的页面
-                .defaultSuccessUrl("/index.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                .antMatchers("/","/login").permitAll() //设置可以直接访问的路径，取消拦截
-                //1.hasAuthority方法：当前登陆用户，只有具有admin权限才可以访问这个路径
-                .antMatchers("/index.html").hasAnyAuthority("26,9")
-                .anyRequest().authenticated()
-                .and().csrf().disable(); //关闭csrf防护
-    }
-
-    @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
-    }
-
-
-    @Bean
-    PasswordEncoder passwordEncoder(){
-        return new BCryptPasswordEncoder();
-    }
-}
-
-
-```
-
-### hasRole方法
-
-如果用户具备给定角色就允许访问，否则报403错误。
-
-![image-20231224145932486](typora文档图片/image-20231224145932486.png)
-
-- 修改配置类
-
-```java
-@Override
-    protected void configure(HttpSecurity http) throws Exception {
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/nopermission.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/login") //登陆时访问的路径
-                .failureUrl("/error.html")//登陆失败的页面
-                .defaultSuccessUrl("/index.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                .antMatchers("/","/login").permitAll() //设置可以直接访问的路径，取消拦截
-                .antMatchers("/index.html").hasRole("admin")
-                .anyRequest().authenticated()
-                .and().csrf().disable(); //关闭csrf防护
-    }
-```
-
-- 在PermissionServiceImpl添加获得角色的功能
-
-```java
-    @Override
-    public List<Integer> getRoleByName(SysUser sysUser) {
-        return roleUserMapper.selectByUserId(sysUser.getId());
-    }
-```
-
-- 修改UserDetailsService
-
-```java
-//权限设置
-@Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        //根据用户输入的用户名去数据库查询具体的用户对象
-        if(StringUtils.isNullOrEmpty(username)){
-            return null;
-        }
-        //数据库查询
-        SysUser sysUser = userMapper.selectByUsername(username);
-        User user = null;
-        if(Objects.nonNull(sysUser)){
-            //从数据库获得该用户相关的权限
-        		List<Integer> permissons = permissionService.getPermissonsByName(username);
-        		String perString = permissons.stream().map(String::valueOf).collect(Collectors.joining(","));
-
-          	//从数据库获得该用户的角色
-        		SysUser sysUser = userMapper.selectByUsername(username);
-        		List<Integer> roles = permissionService.getRoleByName(sysUser);
-        		String roleString = roles.stream().map(num -> "ROLE_" + num).collect(Collectors.joining(","));
-
-        		//设置权限
-        		List<GrantedAuthority> auths = AuthorityUtils.commaSeparatedStringToAuthorityList(perString+","+roleString);
-
-            user = new User(username,sysUser.getPassword(),auths);
-        }
-        return user;
-
-    }
-```
-
-> 其中角色student需要在设置时加上“ROLE_”前缀，因为通过源码hasRole方法给自定义的角色名前加上了“ROLE_”前缀
-
-```java
-private static String hasRole(String role) {
-        Assert.notNull(role, "role cannot be null");
-        Assert.isTrue(!role.startsWith("ROLE_"), () -> {
-            return "role should not start with 'ROLE_' since it is automatically inserted. Got '" + role + "'";
-        });
-        return "hasRole('ROLE_" + role + "')";
-    }
-```
-
-
-
-### hasAnyRole方法
-
-设置多个角色，多个角色之间使用逗号隔开，只要用户具有某一个角色，就能访问。
-
-![image-20231224145953618](typora文档图片/image-20231224145953618.png)
-
-![image-20231224150019864](typora文档图片/image-20231224150019864.png)
-
-```java
-@Override
-    protected void configure(HttpSecurity http) throws Exception {
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/nopermission.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/login") //登陆时访问的路径
-                .failureUrl("/error.html")//登陆失败的页面
-                .defaultSuccessUrl("/index.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                .antMatchers("/","/login").permitAll() //设置可以直接访问的路径，取消拦截
-                .antMatchers("/index.html").hasAnyRole("role1","role2")
-                .anyRequest().authenticated()
-                .and().csrf().disable(); //关闭csrf防护
-    }
-```
-
-
-
-## 自动登陆
-
-1. 准备数据库表
-
-创建persistent_logins表，用于持久化自动登陆的信息。
-
-```sql
-create table persistent_logins (username varchar(64) not null, series varchar(64) primary key, token varchar(64) not null, last_used timestamp not null)
-```
-
-2.实现自动登陆
-
-- 修改SecurityConfig配置类
-
-```java
-package com.qf.my.ss.demo.config;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.authentication.rememberme.JdbcTokenRepositoryImpl;
-import org.springframework.security.web.authentication.rememberme.PersistentTokenRepository;
-
-import javax.sql.DataSource;
-
-/**
- * @author Thor
- * @公众号 Java架构栈
- */
-@EnableWebSecurity
-public class PermissionConfig extends WebSecurityConfigurerAdapter {
-
-    @Autowired
-    private DataSource dataSource;
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-
-        //配置数据源
-        JdbcTokenRepositoryImpl tokenRepository = new JdbcTokenRepositoryImpl();
-        tokenRepository.setDataSource(dataSource);
-        
-
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/nopermission.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/login") //登陆时访问的路径
-                .failureUrl("/error.html")//登陆失败的页面
-                .defaultSuccessUrl("/index.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                .antMatchers("/","/login").permitAll() 
-                .antMatchers("/index.html").hasRole("1")
-                .anyRequest().authenticated()
-                //开启记住我功能
-                .and().rememberMe().userDetailsService(userDetailsService)
-                //持久化令牌方案
-                .tokenRepository(tokenRepository)
-                //设置令牌有效期，为7天有效期
-                .tokenValiditySeconds(60*60*24*7)
-                .and().csrf().disable(); //关闭csrf防护
-    }
-
-    @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
-    }
-
-
-    @Bean
-    PasswordEncoder passwordEncoder(){
-        return new BCryptPasswordEncoder();
-    }
-}
-
-```
-
-- 前端页面添加自动登陆表单项
-
-```html
-                <div class="checkbox">
-                    <label>
-                        <input type="checkbox" name="remember-me"> 记住我
-                    </label>
-                </div>
-```
-
-3.自动登陆底层实现逻辑
-
-> - 首先从前端传来的 cookie 中解析出 series 和 token；
->
-> - 根据 series 从数据库中查询出一个 PersistentRememberMeToken 实例；
->
-> - 如果查出来的 token 和前端传来的 token 不相同，说明账号可能被人盗用(别人用你的令牌登录之后，token 会变)。此时根据用户名移除相关的 token，相当于必须要重新输入用户名密码登录才能获取新的自动登录权限。
->
-> - 接下来校验 token 是否过期;
->
-> - 构造新的 PersistentRememberMeToken 对象，并且更新数据库中的 token(这就是我们文章开头说的，新的会话都会对应一个新的 token)；
->
-> - 将新的令牌重新添加到 cookie 中返回；
->
-> - 根据用户名查询用户信息，再走一波登录流程。
->
-> 
-
-## 用户注销
-
-![](typora文档图片/用户注销流程.png)
-
-1.在配置类添加注销的配置
-
-```java
- @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        //注销的配置
-        http.logout().logoutUrl("/logout") //注销时访问的路径
-                .logoutSuccessUrl("/logoutSuccess").permitAll(); //注销成功后访问的路径
-
-        //配置没有权限的跳转页面
-        http.exceptionHandling().accessDeniedPage("/error.html");
-        http.formLogin()
-                .loginPage("/login.html") //设置自定义登陆页面
-                .loginProcessingUrl("/usr/login") //登陆时访问的路径
-//                .defaultSuccessUrl("/index").permitAll() //登陆成功后跳转的路径
-                .defaultSuccessUrl("/success.html").permitAll() //登陆成功后跳转的路径
-                .and().authorizeRequests()
-                    .antMatchers("/","/add","/user/login").permitAll() //设置可以直接访问的路径，取消拦截
-                    //1.hasAuthority方法：当前登陆用户，只有具有admin权限才可以访问这个路径
-                    //.antMatchers("/index").hasAuthority("admin")
-                    //2.hasAnyAuthority方法：当前登陆用户，具有admin或manager权限可以访问这个路径
-                    //.antMatchers("/index").hasAnyAuthority("admin,manager")
-                    //3.hasRole方法：当前主体具有指定角色，则允许访问
-                    //.antMatchers("/index").hasRole("student")
-                    //4.hasAnyRole方法：当前主体只要具备其中某一个角色就能访问
-                    .antMatchers("/index").hasAnyRole("student1,teacher")
-                .anyRequest().authenticated()
-                .and().csrf().disable(); //关闭csrf防护
-    }
-```
-
-2.设置注销链接
-
-添加success.html页面作为登陆成功后的跳转页面
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
-    登陆成功 <a href="/logout">退出</a>
-</body>
-</html>
-```
-
-登陆后访问退出按钮，实现注销功能。
-
-## JWT
-
-即 Json Web Token
-
-1.基于Token的认证方式
-
-> 使用基于Token的身份验证方法，在服务端不需要存储用户的登陆信息。流程如下：
->
-> - 客户端使用用户名和密码请求登陆。
-> - 服务端收到请求，去验证用户名和密码。
-> - 验证成功后，服务端会签发一个Token，再把这个Token发送给客户端。
-> - 客户端收到Token以后可以把它存储在Cookie本地。
-> - 客户端每次向服务端请求资源时需要携带Cookie中该Token。
-> - 服务端收到请求后，验证客户端携带的Token，如果验证成功则返回数据。
-
-<img src="typora文档图片/jwt认证.png" alt="jwt认证" style="zoom:70%;" />
-
-2.什么是JWT
-
-> JSON Web Token （JWT）是一个开放的行业标准（RFC 7519），它定义了一种简洁的、自包含的协议格式，用于在通信双方传递json对象，传递的信息经过数字签名可以被验证和信任。JWT可以使用HMAC算法或使用RSA的公钥/私钥对进行签名，防止被篡改。
->
-> JWT官网： https://jwt.io
->
-> JWT令牌的优点：
->
-> - JWT基于json，非常方便解析。
-> - 可以在令牌中自定义丰富的内容，易扩展。
-> - 通过非对称加密算法及数字签名技术，JWT防止篡改，安全性高。
-> - 资源服务使用JWT可不依赖认证服务即完成授权。
->
-> JWT令牌的缺点：
->
-> - JWT令牌较长，占存储空间比较大。
-
-
-
-3.JWT组成
-
-> 一个JWT实际上就一个字符串，它由三部分组成，头部、负载与签名。
-
-
-
-1）头部（Header）
-
-> 头部用于描述关于该JWT的最基本信息，例如其类型（即JWT）以及签名所用的算法（如HMAC SHA256 或 RSA）等。这也可以被表示成一个JSON对象。
-
-```json
-{
-  "alg":"HS256",
-  "typ":"JWT"
-}
-```
-
-> - alg：签名算法
-> - typ：类型
->
-> 我们对头部的json字符串进行BASE64编码，编码后的字符串如下：
-
-```
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
-```
-
-> Base64是一种基于64个可打印字符串来表示二进制数据的表示方式。JDK提供了非常方便的Base64Encoder和Base64Decoder，用它们可以非常方便的完成基于Base64的编码和解码。
-
-
-
-2）负载（Payload）
-
-> 负载，是存放有效信息的地方，比如用户的基本信息可以存在该部分中。负载包含三个部分：
->
-> - 标准中注册的声明（建议但不强制使用）
->     - iss：jwt签发者
->     - sub：jwt所面向的用户
->     - aud：接收jwt的一方
->     - exp：jwt的过期时间，过期时间必须大于签发时间
->     - nbf：定义在什么时间之前，该jwt都是不可用的
->     - iat：jwt的签发时间
->     - jti：jwt的唯一身份标识，主要用来作为一次性token，从而回避重放攻击。
->
-> - 公共的声明
->
-> 公共的声明可以添加任何信息，一般添加用户的相关信息或其他业务需要的必要信息，但不建议添加敏感信息，因为该部分在客户端可解密。
->
-> - 私有的声明
->
-> 私有声明是提供者和消费者所共同定义的声明，一般不建议存放敏感信息，因为base64是对称解密的，意味着该部分信息可以归类为明文信息。
->
-> 私有声明也就是自定义claim，用于存放自定义键值对。
-
-```json
-{
-  "sub": "1234567890",
-  "name": "John Doe",
-  "iat": 1516239022
-}
-```
-
-> 其中sub是标准的声明，name是自定义的私有声明，编码后如下：
-
-```
-eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ
-```
-
-
-
-3）签证、签名（Signature）
-
-> jwt的第三部分是一个签证信息，由三部分组成：
->
-> - Header（Base64编码后）
-> - Payload（Base64编码后）
-> - Secret（盐，必须保密）
->
-> 这个部分需要Base64加密后的header和base4加密后的payload使用.连接组成的字符串，然后通过header重声明的加密方式进行加盐Secret组合加密，然后就构成了JWT的第三部分——使用“qfjava”作为盐：
-
-```
-eZqdTo1mRMB-o7co1oAiTvNvumfCkt-1H-CdfNm78Cw
-```
-
-> 从官方工具中可以看到，三个部分组合出的完整字符串：
-
-```
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.eZqdTo1mRMB-o7co1oAiTvNvumfCkt-1H-CdfNm78Cw
-```
-
-![image-20210310163620788](../../../../zeleishi/Documents/工作/精品视频/springsecurity/pic/jwttoken.png)
-
-
-
-> 注意：secret是保存在服务器端的，jwt在签发生成也是在服务器端的，secret就是用来进行jwt的签发和验证，所以，它就是服务器端的私钥，在任何场景都不应该泄漏。一旦客户端得知这个secret，那就意味着客户端是可以自我签发jwt了。
-
-4.使用JJWT
-
-JJWT是一个提供端到端的JWT创建和验证的开源Java库。也就是说使用JJWT能快速完成JWT的功能开发。
-
-- 引入依赖
-
-> 创建Springboot工程并引入jjwt依赖，pom.xml如下：
-
-```xml
-        <!--jjwt-->
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt</artifactId>
-            <version>RELEASE</version>
-        </dependency>
-```
-
-- 创建Token
-
-```java
-    @Test
-    public void testCrtToken(){
-
-        //创建JWT对象
-        JwtBuilder builder = Jwts.builder().setId("1001")//设置负载内容
-                .setSubject("小明")
-                .setIssuedAt(new Date())//设置签发时间
-                .signWith(SignatureAlgorithm.HS256, "qfjava");//设置签名秘钥
-        //构建token
-        String token = builder.compact();
-        System.out.println(token);
-
-    }
-```
-
-
-
-> JWT将用户信息转换成Token字符串，生成结果如下：
-
-```
-eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiIxMDAxIiwic3ViIjoi5bCP5piOIiwiaWF0IjoxNjE1MzY2MDEyfQ.2LNcw1v64TNQ96eCpWKvtAccBUA-cEVMDyJNMef-zu0
-```
-
-
-
-- 解析Token
-
-> 通过JWT解析Token，获取Token中存放的用户信息，即生成Claims对象。
-
-```java
-    @Test
-    public void testParseToken(){
-        String token = "eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiIxMDAxIiwic3ViIjoi5bCP5piOIiwiaWF0IjoxNjE1MzY2MDEyfQ.2LNcw1v64TNQ96eCpWKvtAccBUA-cEVMDyJNMef-zu0";
-        //解析Token，生成Claims对象，Token中存放的用户信息解析到了claims对象中
-        Claims claims = Jwts.parser().setSigningKey("qfjava").parseClaimsJws(token).getBody();
-        System.out.println("id:" + claims.getId());
-        System.out.println("subject:" + claims.getSubject());
-        System.out.println("IssuedAt:" + claims.getIssuedAt());
-    }
-```
-
-> 解析结果如下：
-
-```
-id:1001
-subject:小明
-IssuedAt:Wed Mar 10 16:46:52 CST 2021
-```
-
-
-
-- Token过期检验
-
-> 在有效期内Token可以正常读取，超过有效期则Token失效
-
-```java
-    @Test
-    public void testExpToken(){
-        long now = System.currentTimeMillis();  //当前时间
-        long exp = now + 1000 * 60; //过期时间为1分钟
-        JwtBuilder builder = Jwts.builder().setId("1001")
-                .setSubject("小明")
-                .setIssuedAt(new Date())
-                .signWith(SignatureAlgorithm.HS256, "qfjava")
-                .setExpiration(new Date(exp));//设置超时
-    }
-```
-
-
-
-- 自定义claims
-
-> 除了使用官方api设置属性值，也可以添加自定义键值对。
-
-```java
-    @Test
-    public void testCustomClaims(){
-        long now = System.currentTimeMillis();  //当前时间
-        long exp = now + 1000 * 60; //过期时间为1分钟
-        JwtBuilder builder = Jwts.builder().setId("1001")
-                .setSubject("小明")
-                .setIssuedAt(new Date())
-                .signWith(SignatureAlgorithm.HS256, "qfjava")
-                .setExpiration(new Date(exp))
-                .claim("role", "admin");//设置自定义键值对
-    }
-```
-
-> 使用下面语句获取属性值：
-
-```java
-claims.get("role")
-```
-
-## 微服务项目-使用Security+JWT实现权限管理
-
-1.前后端分离的权限管理
-
-![Spring Security + jwt 前后端分离的权限系统的时序图](typora文档图片/Spring Security + jwt 前后端分离的权限系统的时序图.png)
-
-2.引入依赖
-
-```xml
-        <!--redis-->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-
-        <!--spring security-->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-
-        <!--mysql驱动-->
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-        </dependency>
-
-        <!--druid连接-->
-        <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>druid-spring-boot-starter</artifactId>
-            <version>1.1.10</version>
-        </dependency>
-
-        <!--mybatis-->
-        <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>1.3.2</version>
-        </dependency>
-
-        <!--jjwt-->
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt</artifactId>
-            <version>RELEASE</version>
-        </dependency>
-
-        <!--lombok-->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
-
-```
-
-3.登陆过滤器的实现
-
-```java
-package com.qf.my.security.admin.demo.filter;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.qf.my.security.admin.demo.common.ResponseUtil;
-import com.qf.my.security.admin.demo.common.ResultModel;
-import com.qf.my.security.admin.demo.entity.SecurityUser;
-import com.qf.my.security.admin.demo.entity.User;
-import com.qf.my.security.admin.demo.security.TokenManager;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
-
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.util.ArrayList;
-
-/**
- * @author Thor
- * @公众号 Java架构栈
- */
-public class TokenLoginFilter extends UsernamePasswordAuthenticationFilter {
-
-    private TokenManager tokenManager;
-    private RedisTemplate redisTemplate;
-    private AuthenticationManager authenticationManager;
-
-    public TokenLoginFilter(AuthenticationManager authenticationManager,TokenManager tokenManager, RedisTemplate redisTemplate) {
-        this.tokenManager = tokenManager;
-        this.redisTemplate = redisTemplate;
-        this.authenticationManager = authenticationManager;
-        //不是只允许post请求，经过这个filter
-        this.setPostOnly(false);
-        //设置登陆的路径和请求方式
-        this.setRequiresAuthenticationRequestMatcher(new AntPathRequestMatcher("/user/login","POST"));
-    }
-
-    /**
-     * 执行认证的方法
-     * @param request
-     * @param response
-     * @return
-     * @throws AuthenticationException
-     */
-    @Override
-    public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response) throws AuthenticationException {
-        //获取表单提供的数据
-        ObjectMapper objectMapper = new ObjectMapper();
-        try {
-            User user = objectMapper.readValue(request.getInputStream(), User.class);
-            //校验==认证的过程
-            Authentication authenticate = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(user.getUsername(), user.getPassword()
-                            , new ArrayList<>())
-            );
-            return authenticate;
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            throw new RuntimeException("认证失败");
-        }
-
-    }
-
-    /**
-     * 认证成功以后调用的方法
-     * @param request
-     * @param response
-     * @param chain
-     * @param authResult
-     * @throws IOException
-     * @throws ServletException
-     */
-    @Override
-    protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response, FilterChain chain, Authentication authResult) throws IOException, ServletException {
-
-        //得到用户名
-        SecurityUser securityUser = (SecurityUser) authResult.getPrincipal();
-        String username = securityUser.getUsername();
-        //生成token
-        String token = tokenManager.crtToken(username);
-        //存入到redis  username: 权限
-        redisTemplate.opsForValue().set(username,securityUser.getPermissionValueList());
-        //返回token
-        ResponseUtil.out(response, ResultModel.success(token));
-
-    }
-
-    /**
-     * 认证失败调用的方法
-     * @param request
-     * @param response
-     * @param failed
-     * @throws IOException
-     * @throws ServletException
-     */
-    @Override
-    protected void unsuccessfulAuthentication(HttpServletRequest request, HttpServletResponse response, AuthenticationException failed) throws IOException, ServletException {
-        ResponseUtil.out(response,ResultModel.error(401,failed.getMessage()));
-    }
-}
-
-```
-
-4.权限过滤器的实现
-
-```java
-package com.qf.my.security.admin.demo.filter;
-
-import com.mysql.cj.util.StringUtils;
-import com.qf.my.security.admin.demo.security.TokenManager;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
-import org.springframework.util.CollectionUtils;
-
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-
-/**
- * @author Thor
- * @公众号 Java架构栈
- */
-public class TokenAuthFilter extends BasicAuthenticationFilter {
-
-    private TokenManager tokenManager;
-    private RedisTemplate redisTemplate;
-
-    public TokenAuthFilter(AuthenticationManager authenticationManager,
-                           TokenManager tokenManager,RedisTemplate redisTemplate) {
-        super(authenticationManager);
-        this.tokenManager = tokenManager;
-        this.redisTemplate = redisTemplate;
-    }
-
-    /**
-     * 权限相关的操作
-     * @param request
-     * @param response
-     * @param chain
-     * @throws IOException
-     * @throws ServletException
-     */
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
-        //获得token
-        String token = request.getHeader("token");
-        if(!StringUtils.isNullOrEmpty(token)){
-            //使用jwt解析token获得username
-            String username = tokenManager.getUsernameFromToken(token);
-            //从redis中获得该用户名对应的权限
-            List<String> permissionValueList = (List<String>) redisTemplate.opsForValue().get(username);
-            //将取出的权限存入到权限上下文中，表示当前token对应的用户具备哪些权限
-            Collection<GrantedAuthority> authorityCollection = new ArrayList<>();
-            if(!CollectionUtils.isEmpty(permissionValueList)){
-                for (String permissionValue : permissionValueList) {
-                    SimpleGrantedAuthority authority = new SimpleGrantedAuthority(permissionValue);
-                    authorityCollection.add(authority);
-                }
-            }
-            //生成权限信息对象
-            UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(username,token,authorityCollection);
-            //把权限信息对象存入到权限上下文中
-            SecurityContextHolder.getContext().setAuthentication(authenticationToken);
-        }
-        //放行
-        chain.doFilter(request,response);
-    }
-}
-
-```
-
-5.注销处理器的实现
-
-```java
-package com.qf.my.security.admin.demo.security;
-
-import com.mysql.cj.util.StringUtils;
-import com.qf.my.security.admin.demo.common.ResponseUtil;
-import com.qf.my.security.admin.demo.common.ResultModel;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.web.authentication.logout.LogoutHandler;
-
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
-/**
- * @author Thor
- * @公众号 Java架构栈
- */
-public class TokenLogoutHandler implements LogoutHandler {
-
-    private TokenManager tokenManager;
-    private RedisTemplate redisTemplate;
-
-    public TokenLogoutHandler(TokenManager tokenManager, RedisTemplate redisTemplate) {
-        this.tokenManager = tokenManager;
-        this.redisTemplate = redisTemplate;
-    }
-
-    /**
-     * 注销时具体要执行的业务
-     * @param request
-     * @param response
-     * @param authentication
-     */
-    @Override
-    public void logout(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
-        //1.从请求头中获得前端携带的token
-        String token = request.getHeader("token");
-        if(!StringUtils.isNullOrEmpty(token)){
-            //2.使用jwt解析token
-            String username = tokenManager.getUsernameFromToken(token);
-            //3.删除redis中的数据
-            redisTemplate.delete(username);
-        }
-        ResponseUtil.out(response, ResultModel.success("注销成功"));
-    }
-}
-
-```
-
-6.用户名密码验证逻辑
-
-```java
-package com.qf.my.security.admin.demo.service.impl;
-
-import com.qf.my.security.admin.demo.entity.SecurityUser;
-import com.qf.my.security.admin.demo.entity.User;
-import com.qf.my.security.admin.demo.service.PermissionService;
-import com.qf.my.security.admin.demo.service.UserService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.stereotype.Service;
-
-import java.util.List;
-import java.util.Objects;
-
-@Service("userDetailsService")
-public class UserDetailsServiceImpl implements UserDetailsService {
-
-    @Autowired
-    private UserService userService;
-
-    @Autowired
-    private PermissionService permissionService;
-
-    @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        //根据用户名从数据库查询到该用户的信息
-        User user = userService.selectByUsername(username);
-        if(Objects.isNull(user)) {
-            throw new UsernameNotFoundException("当前用户不存在");
-        }
-        //根据用户名从数据库查询到该用户的权限信息
-        List<String> permissionValues = permissionService.selectPermissionValueByUserId(user.getId());
-        SecurityUser securityUser = new SecurityUser();
-        securityUser.setCurrentUserInfo(user);
-        securityUser.setPermissionValueList(permissionValues);
-        return securityUser;
-    }
-}
-
-```
-
-
-
-
-
-
-
-
-
-
-
-在SpringSecurity框架中有三个非常核心的类和接口，分别是：
-
-- SecurityFilterChain接口；
-- FilterChainProxy类；
-- DelegatingFilterProxy类；
-
-这个三个接口和类的相互之间的步骤关系如下：
-
-1. 生成一个`FilterChainProxy`类型的对象，该类有一个**属性**`filterChains`，是SecurityFilterChain类型的List集合；该对象被spring容器通过bean管理，名称为 `springSecurityFilterChain`， 类型为`FilterChainProxy`。
-
-    底层通过`FilterChainProxy`代理去调用各种Filter(Filter链)，`Filter`通过调用`AuthenticationManager`完成认证 ，通过调用`AccessDecisionManager`完成授权。
-
-    ```java
-    // SecurityFilterChain
-    public interface SecurityFilterChain {
-        boolean matches(HttpServletRequest request);
-    
-        List<Filter> getFilters();
-    }
-    
-    // FilterChainProxy
-    public class FilterChainProxy extends GenericFilterBean {
-        private List<SecurityFilterChain> filterChains;
-    }
-    ```
-
-2. 生成一个DelegatingFilterProxy类型的对象，将名为springSecurityFilterChain的bean（上面的）作为`DelegatingFilterProxy`类对象的**属性targetBeanName的值**，供后面请求时获取bean。这样`FilterChainProxy`类型的对象就被`DelegatingFilterProxy`类型的对象委托管理了。
-
-    注意：DelegatingFilterProxy对象的生成是tomcat启动过程中会调用所有继承了RegistrationBean类的onStartUp方法，最终调用了实现类中的addRegistration方法。
-
-3. 前端发起请求时，调用了DelegatingFilterProxy类型的拦截器执行doFilter方法。doFilter方法获取被委托的对象FilterChainProxy并调用其doFilter方法（即FilterChainProxy的doFilter方法），执行获取到的所有的拦截器然后再获取代理对象执行容器加载时保存的拦截器再执行。
-
--------------------------------**第一步**-------------------------------
-
-**生成一个FilterChainProxy类型的对象**
-
-![image-20231225134414405](typora文档图片/image-20231225134414405.png)
-
-可以看到请求访问时，`DelegatingFilterProxy`管理`FilterChainProxy`，`FilterChainProxy`里调用`SecurityFilterChain`类型的过滤器。
-
-[Java SPI 机制](https://blog.csdn.net/qq_37967783/article/details/131505676)
-
-Spring的Factories就是Spring版本的Java Spi，我在关于java基础系列文章中有详细介绍Java SPI机制。 Spring Factories的最重要的功能就是：可以通过配置文件指定Spring容器加载一些特定的组件。
-
-Spring Factories是一种类似于Java SPI的机制，它在META-INF/spring.factories文件中配置接口的实现类名称，然后在程序中读取这些配置文件并实例化。
-
-在springboot启动过程中会获取spring.factories配置文件里的配置类并加载到spring容器中，观察spring.factories配置文件里的配置内容，涉及到springsecurity的如下图红框处所示。
-
-![image-20231225170234268](typora文档图片/image-20231225170234268.png)
-
-先看 `SecurityAutoConfiguration` 和 `SecurityFilterAutoConfiguration` 这两个配置类：
-
-![image-20231225170325342](typora文档图片/image-20231225170325342.png)
-
-**配置类是如何获取到 springSecurityFilterChain这个bean的**
-
-分析`SecurityAutoConfiguration`配置类：
-
-```java
-@Configuration(
-    proxyBeanMethods = false
-)
-@ConditionalOnClass({DefaultAuthenticationEventPublisher.class})
-@EnableConfigurationProperties({SecurityProperties.class})
-@Import({SpringBootWebSecurityConfiguration.class, WebSecurityEnablerConfiguration.class, SecurityDataConfiguration.class, ErrorPageSecurityFilterConfiguration.class})
-public class SecurityAutoConfiguration {
-    public SecurityAutoConfiguration() {
-    }
-
-    @Bean
-    @ConditionalOnMissingBean({AuthenticationEventPublisher.class})
-    public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
-        return new DefaultAuthenticationEventPublisher(publisher);
-    }
-}
-```
-
-该配置类里导入的四个配置类：
-
-- SpringBootWebSecurityConfiguration.class：作用是WebSecurityConfigurerAdapter 类存在但是bean对象不存在时注册默认的WebSecurityConfigurerAdapter 类型是DefaultConfigurerAdapter的bean。
-
-    ```java
-    @Configuration(
-        proxyBeanMethods = false
-    )
-    @ConditionalOnDefaultWebSecurity
-    @ConditionalOnWebApplication(
-        type = Type.SERVLET
-    )
-    class SpringBootWebSecurityConfiguration {
-        SpringBootWebSecurityConfiguration() {
-        }
-    
-        @Bean
-        @Order(2147483642)
-        SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-            ((HttpSecurity)((HttpSecurity)((ExpressionUrlAuthorizationConfigurer.AuthorizedUrl)http.authorizeRequests().anyRequest()).authenticated().and()).formLogin().and()).httpBasic();
-            return (SecurityFilterChain)http.build();
-        }
-    }
-    ```
-
-    
-
-- WebSecurityEnablerConfiguration.class：
-
-    该类文件如下，可以看到其中声明了@EnableWebSecurity注解：
+- `WebSecurityEnablerConfiguration.class`：该类文件如下，可以看到其中声明了@EnableWebSecurity注解，该配置类会在 `SpringBootWebSecurityConfiguration` **注入 Spring IoC 容器后启用** @EnableWebSecurity 注解：
 
     ```java
     @Configuration(
@@ -3086,7 +1125,6 @@ public class SecurityAutoConfiguration {
     )
     // 只有当BeanFactory中没有指定的bean的时候才能匹配，主要是用来做自动配置的，当程序没有配置指定的类的时候，就会使用默认配置
     @ConditionalOnMissingBean(
-     
        name = {"springSecurityFilterChain"}
     )
     @ConditionalOnClass({EnableWebSecurity.class})
@@ -3100,8 +1138,1153 @@ public class SecurityAutoConfiguration {
     }
     ```
 
+#### @EnableWebSecurity 注解
+
+源码
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE})
+@Documented
+@Import({WebSecurityConfiguration.class, SpringWebMvcImportSelector.class, OAuth2ImportSelector.class, HttpSecurityConfiguration.class})
+@EnableGlobalAuthentication
+@Configuration
+public @interface EnableWebSecurity {
+    boolean debug() default false;
+}
+```
+
+`@Enable*` 这类注解都是带配置导入的注解。通过导入一些配置来启用一些特定功能。
+
+可以看出，`@EnableWebSecurity` 导入了 `WebSecurityConfiguration` 、 `SpringWebMvcImportSelector` 、 `OAuth2ImportSelector` 以及启用了 `@EnableGlobalAuthentication` 注解。
+
+- **WebSecurityConfiguration**：
+
+    **WebSecurity** 是 Spring Security 提供的用于配置 Web 安全的主要配置类之一。它提供了一些方法，用于配置 Spring Security 的一些基本行为，如忽略某些请求、设置用户信息来源、启用 HTTPS 等。
+
+    简单的说，这个类的作用就是用来创建`FilterChainProxy`，`FilterChainProxy`是一个Servlet Filter，他是一组`SecurityFilterChain`的代理，用于管理这些`SecurityFilterChain`
+
+    首先，`FilterChainProxy`是`SpringSecurity`提供的基于Servlet标准的过滤器，他可以被Servlet容器使用。`SecurityFilterChain`是SpringSecurity提供的自有安全过滤器链，他不是基于Servlet标准的过滤器。`SpringSecurity`使用`FilterChainProxy`管理一组SecurityFilterChain，这样就可以通过代理的方式将`SpringSecurity`自有的滤器链应用于Servlet容器。
+
+    然后，当前配置类会加载容器中所有的WebSecurityConfigurer配置类、WebSecurityCustomizer配置类（5.4以后）、SecurityFilterChain过滤器链。这些都是用于配置生成一个WebSecurity。
+
+    接着，当WebSecurity实例被构建完成后，会使用WebSecurity去创建一个FilterChainProxy，这个FilterChainProxy会被放到容器中。
+
+    **属性字段**：
+
+    ```java
+    @Configuration(
+        proxyBeanMethods = false
+    )
+    public class WebSecurityConfiguration implements ImportAware, BeanClassLoaderAware {
+        // SpringSecurity的FilterChainProxy的建造器
+        private WebSecurity webSecurity; 
+        // 标识是否开启debug模式，来自注解@EnableWebSecurity的属性debug 默认false
+        private Boolean debugEnabled;
+        // SpringSecurity的配置类列表
+        private List<SecurityConfigurer<Filter, WebSecurity>> webSecurityConfigurers;
+    	// SpringSecurity的核心过滤器链的列表
+        private List<SecurityFilterChain> securityFilterChains = Collections.emptyList();
+        // 用户自定义WebSecurity的配置类列表（5.4版本之后新增的配置类）
+        private List<WebSecurityCustomizer> webSecurityCustomizers = Collections.emptyList();
+        // 一个类加载器
+        private ClassLoader beanClassLoader;
+        // 对象后处理器（这里依赖注入的是AutowireBeanFactoryObjectPostProcessor）
+        @Autowired(
+            required = false
+        )
+        private ObjectPostProcessor<Object> objectObjectPostProcessor;
+    ```
+    **主要方法**：
+
+    1. springSecurityFilterChain
+
+        构建Spring Security 核心过滤器 Spring Security Filter Chain ，`Bean ID` 为 `springSecurityFilterChain`。
+
+        首先，在这个方法中**首先会判断是否有用户自定义的WebSecurityConfigurer和SecurityFilterChain**：
+
+        - 如果这两种自定义实例同时存在则会抛出异常。
+        - 如果只存在SecurityFilterChains，将其设置到已经被创建的webSecurity中。
+        - 如果这两个自定义实例都不存在，则会创建一个默认的WebSecurityConfigurerAdapter配置，并将其设置到已经被创建的webSecurity中。
+
+        然后，调用webSecurity.build()方法（最后一行）创建一个FilterChainProxy，返回的是Bean，会被放到容器中。
+
+        ```java
+        @Bean(
+            name = {"springSecurityFilterChain"}
+        )
+        public Filter springSecurityFilterChain() throws Exception {
+            boolean hasConfigurers = this.webSecurityConfigurers != null && !this.webSecurityConfigurers.isEmpty();
+            boolean hasFilterChain = !this.securityFilterChains.isEmpty();
+            Assert.state(!hasConfigurers || !hasFilterChain, "Found WebSecurityConfigurerAdapter as well as SecurityFilterChain. Please select just one.");
+            if (!hasConfigurers && !hasFilterChain) {
+                WebSecurityConfigurerAdapter adapter = (WebSecurityConfigurerAdapter)this.objectObjectPostProcessor.postProcess(new WebSecurityConfigurerAdapter() {
+                });
+                this.webSecurity.apply(adapter);
+            }
+        ------------------------设置webSecurity的拦截器链和拦截器
+            Iterator var7 = this.securityFilterChains.iterator();
+        
+            while(true) {
+                while(var7.hasNext()) {
+                    SecurityFilterChain securityFilterChain = (SecurityFilterChain)var7.next();
+                    this.webSecurity.addSecurityFilterChainBuilder(() -> {
+                        return securityFilterChain;
+                    });
+                    Iterator var5 = securityFilterChain.getFilters().iterator();
+        
+                    while(var5.hasNext()) {
+                        Filter filter = (Filter)var5.next();
+                        if (filter instanceof FilterSecurityInterceptor) {
+                            this.webSecurity.securityInterceptor((FilterSecurityInterceptor)filter);
+                            break;
+                        }
+                    }
+                }
+        ----------------------------用户的一些自定义配置webSecurity
+                var7 = this.webSecurityCustomizers.iterator();
+        
+                while(var7.hasNext()) {
+                    WebSecurityCustomizer customizer = (WebSecurityCustomizer)var7.next();
+                    customizer.customize(this.webSecurity);
+                }
+                return (Filter)this.webSecurity.build();
+            }
+        }
+        ```
+
+    2. setFilterChainProxySecurityConfigurer
+
+        创建一个WebSecurity实例。
+
+        将注解参数列表中@Value()注解引入的所有WebSecurityConfigurer配置设置到WebSecurity实例中。同时初始化了当前配置类的两个属性值webSecurity和webSecurityConfigurers。
+
+        @Value()引入方式就是调用 `AutowiredWebSecurityConfigurersIgnoreParents` 的方法
     
+        ```java
+            /**
+            * 获取并设置容器中已经加载的所有WebSecurityConfigurer实例用于配置，初始化一个WebSecurity
+            * 
+            * @param objectPostProcessor   后处理对象（AutowireBeanFactoryObjectPostProcessor）
+            * @param webSecurityConfigurers 用户自定义的配置（WebSecurityConfigurerAdapter的子类或是WebSecurityConfigurer接口的实现）
+            * @throws Exception
+            */
+            
+            @Autowired(
+                required = false
+            )
+            public void setFilterChainProxySecurityConfigurer(ObjectPostProcessor<Object> objectPostProcessor, @Value("#{@autowiredWebSecurityConfigurersIgnoreParents.getWebSecurityConfigurers()}") List<SecurityConfigurer<Filter, WebSecurity>> webSecurityConfigurers) throws Exception {
+                // 初始化webSecurity
+                this.webSecurity = (WebSecurity)objectPostProcessor.postProcess(new WebSecurity(objectPostProcessor));
+                // 是否开启debug
+                if (this.debugEnabled != null) {
+                    this.webSecurity.debug(this.debugEnabled);
+                }
+            
+                webSecurityConfigurers.sort(WebSecurityConfiguration.AnnotationAwareOrderComparator.INSTANCE);
+                Integer previousOrder = null;
+                Object previousConfig = null;
+            
+                Iterator var5;
+                SecurityConfigurer config;
+                for(var5 = webSecurityConfigurers.iterator(); var5.hasNext(); previousConfig = config) {
+                    config = (SecurityConfigurer)var5.next();
+                    Integer order = WebSecurityConfiguration.AnnotationAwareOrderComparator.lookupOrder(config);
+                    if (previousOrder != null && previousOrder.equals(order)) {
+                        throw new IllegalStateException("@Order on WebSecurityConfigurers must be unique. Order of " + order + " was already used on " + previousConfig + ", so it cannot be used on " + config + " too.");
+                    }
+            
+                    previousOrder = order;
+                }
+            
+                var5 = webSecurityConfigurers.iterator();
+            	// 将配置添加到webSecurity中
+                while(var5.hasNext()) {
+                    config = (SecurityConfigurer)var5.next();
+                    this.webSecurity.apply(config);
+                }
+               	// 将配置类列表复制到类属性webSecurityConfigurers上
+                this.webSecurityConfigurers = webSecurityConfigurers;
+            }
+        ```
+    
+        ​    
+    
+    3. 从当前bean容器中获取所有的WebSecurityConfigurer bean
+    
+        这些WebSecurityConfigurer通常是由开发人员实现的配置类，并且继承自 WebSecurityConfigurerAdapter。
+    
+        ```java
+        // 初始化一个AutowiredWebSecurityConfigurersIgnoreParents实例，用于加载容器中的所有WebSecurityConfigurer实例
+        
+        @Bean
+        public static AutowiredWebSecurityConfigurersIgnoreParents autowiredWebSecurityConfigurersIgnoreParents(ConfigurableListableBeanFactory beanFactory) {
+            return new AutowiredWebSecurityConfigurersIgnoreParents(beanFactory);
+        }
+        ```
+    
+    4. 获取注解 @EnableWebSecurity 的属性 debugEnabled
+    
+        ```java
+        public void setImportMetadata(AnnotationMetadata importMetadata) {
+            Map<String, Object> enableWebSecurityAttrMap = importMetadata.getAnnotationAttributes(EnableWebSecurity.class.getName());
+            AnnotationAttributes enableWebSecurityAttrs = AnnotationAttributes.fromMap(enableWebSecurityAttrMap);
+            this.debugEnabled = enableWebSecurityAttrs.getBoolean("debug");
+            if (this.webSecurity != null) {
+                this.webSecurity.debug(this.debugEnabled);
+            }
+        
+        }
+        ```
+    
+    5. 用于获取类上的@Order注解，并提供比较的功能
+    
+        ```java
+        private static class AnnotationAwareOrderComparator extends OrderComparator {
+            private static final AnnotationAwareOrderComparator INSTANCE = new AnnotationAwareOrderComparator();
+        
+            private AnnotationAwareOrderComparator() {
+            }
+        
+            protected int getOrder(Object obj) {
+                return lookupOrder(obj);
+            }
+        
+            private static int lookupOrder(Object obj) {
+                if (obj instanceof Ordered) {
+                    return ((Ordered)obj).getOrder();
+                } else {
+                    if (obj != null) {
+                        Class<?> clazz = obj instanceof Class ? (Class)obj : obj.getClass();
+                        Order order = (Order)AnnotationUtils.findAnnotation(clazz, Order.class);
+                        if (order != null) {
+                            return order.value();
+                        }
+                    }
+        
+                    return Integer.MAX_VALUE;
+                }
+            }
+        }
+        ```
 
-- SecurityDataConfiguration.class：
+* **SpringWebMvcImportSelector**
 
-- ErrorPageSecurityFilterConfiguration.class
+    该类是为了对 Spring Mvc 进行支持的。一旦发现应用使用 Spring Mvc 的核心前置控制器 DispatcherServlet 就会引入 WebMvcSecurityConfiguration 。主要是为了适配 Spring Mvc 。
+
+* **OAuth2ImportSelector**
+
+    该类是为了对 OAuth2.0 开放授权协议进行支持。 ClientRegistration 如果被引用，具体点也就是 spring-security-oauth2 模块被启用（引入依赖jar）时。会启用 OAuth2 客户端配置 OAuth2ClientConfiguration。
+
+* **HttpSecurityConfiguration**
+
+    @EnableWebSecurity注解上的@Import()注解引入的四类之一。
+
+    首先，他会通过@Autowired去获取容器中的一个AuthenticationManager实例，如果没能获取到则使用依赖注入的AuthenticationConfiguration实例创建一个AuthenticationManager实例，这个实例其实就是ProviderManager。以上介绍就是当前配置类中的authenticationManager()方法的实现方式。
+
+    然后，他会创建一个AuthenticationManagerBuilder（使用的是DefaultPasswordEncoderAuthenticationManagerBuilder），使用的密码编码器是LazyPasswordEncoder，同时将这个建造器的Parent-AuthenticationManager设置成当前配置类创建的AuthenticationManager（这里其实就是ProviderManager的一个实例）。
+
+    接着，使用DefaultPasswordEncoderAuthenticationManagerBuilder这个建造器构建一个HttpSecurity实例，并为HttpSecurity设置了一些默认配置。这个单例的HttpSecurity会被注入到容器中，用户就可以使用他进行自定义的鉴权配置了。
+
+    **类的属性**：
+
+    ```java
+    @Configuration(
+        proxyBeanMethods = false
+    )
+    class HttpSecurityConfiguration {
+        // 类名前缀
+        private static final String BEAN_NAME_PREFIX = "org.springframework.security.config.annotation.web.configuration.HttpSecurityConfiguration.";
+        // 在容器中的HttpSecurit实例名称
+        private static final String HTTPSECURITY_BEAN_NAME = "org.springframework.security.config.annotation.web.configuration.HttpSecurityConfiguration.httpSecurity";
+        // 对象后处理器
+        private ObjectPostProcessor<Object> objectPostProcessor;
+        // 鉴权管理器
+        private AuthenticationManager authenticationManager;
+        // 鉴权管理器的配置，如果没有从容器中获取到AuthenticationManager，会使用该配置创建一个AuthenticationManager
+        private AuthenticationConfiguration authenticationConfiguration;
+        // 容器
+        private ApplicationContext context;
+    ```
+    **主要方法**
+
+    1. `httpSecurity()`
+
+        ```java
+        @Bean({"org.springframework.security.config.annotation.web.configuration.HttpSecurityConfiguration.httpSecurity"})
+         @Scope("prototype")
+         HttpSecurity httpSecurity() throws Exception {
+             // 密码编码器
+             WebSecurityConfigurerAdapter.LazyPasswordEncoder passwordEncoder = new WebSecurityConfigurerAdapter.LazyPasswordEncoder(this.context);
+             // AuthenticationManager建造器
+             AuthenticationManagerBuilder authenticationBuilder = new WebSecurityConfigurerAdapter.DefaultPasswordEncoderAuthenticationManagerBuilder(this.objectPostProcessor, passwordEncoder);
+             // 获取AuthenticationManager（ProviderManager），设置为父AuthenticationManager，用于管理所有的AuthenticationProvider
+             authenticationBuilder.parentAuthenticationManager(this.authenticationManager());
+             authenticationBuilder.authenticationEventPublisher(this.getAuthenticationEventPublisher());
+             // 创建一个HttpSecurity，相当于xml文件配置中的http名称空间
+             HttpSecurity http = new HttpSecurity(this.objectPostProcessor, authenticationBuilder, this.createSharedObjects());
+             // 一些默认的配置
+             http
+                 .csrf(Customizer.withDefaults())
+                 .addFilter(new WebAsyncManagerIntegrationFilter())
+                 .exceptionHandling(Customizer.withDefaults())
+                 .headers(Customizer.withDefaults())
+                 .sessionManagement(Customizer.withDefaults())
+                 .securityContext(Customizer.withDefaults())
+                 .requestCache(Customizer.withDefaults())
+                 .anonymous(Customizer.withDefaults())
+                 .servletApi(Customizer.withDefaults())
+                 .apply(new DefaultLoginPageConfigurer());
+             http.logout(Customizer.withDefaults());
+             return http;
+         }
+        ```
+    
+    2. `authenticationManager()`
+    
+        获取AuthenticationManager（ProviderManager），如果已经初始化就直接返回，如果没有就直接使用authenticationConfiguration配置类创建一个。
+    
+        ```java
+         private AuthenticationManager authenticationManager() throws Exception {
+             return this.authenticationManager != null ? this.authenticationManager : this.authenticationConfiguration.getAuthenticationManager();
+         }
+        ```
+    
+    3. `getAuthenticationEventPublisher()`
+    
+        ```java
+        private AuthenticationEventPublisher getAuthenticationEventPublisher() {
+                return this.context.getBeanNamesForType(AuthenticationEventPublisher.class).length > 0 ? (AuthenticationEventPublisher)this.context.getBean(AuthenticationEventPublisher.class) : (AuthenticationEventPublisher)this.objectPostProcessor.postProcess(new DefaultAuthenticationEventPublisher());
+            }
+        ```
+    
+    4. `createSharedObjects()`
+    
+       将ApplicationContext包装起来供HttpSecurity使用
+    
+       ```java
+               private Map<Class<?>, Object> createSharedObjects() {
+                   Map<Class<?>, Object> sharedObjects = new HashMap();
+                   sharedObjects.put(ApplicationContext.class, this.context);
+                   return sharedObjects;
+               }
+       ```
+
+#### SecurityFilterAutoConfiguration
+
+```java
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnWebApplication(type = Type.SERVLET)
+@EnableConfigurationProperties(SecurityProperties.class)
+@ConditionalOnClass({ AbstractSecurityWebApplicationInitializer.class, SessionCreationPolicy.class })
+@AutoConfigureAfter(SecurityAutoConfiguration.class)
+public class SecurityFilterAutoConfiguration {
+    
+    // 要注册到 Servlet 容器的 DelegatingFilterProxy Filter的目标代理Filter bean的名称 ：springSecurityFilterChain
+	private static final String DEFAULT_FILTER_NAME = AbstractSecurityWebApplicationInitializer.DEFAULT_FILTER_NAME;
+```
+
+顾名思义，是一个过滤器的自动配置类。
+
+`@ConditionalOnWebApplication(type = Type.SERVLET)`：表示仅在 Servlet 环境下生效。
+
+`@EnableConfigurationProperties(SecurityProperties.class)`：确保安全属性配置信息被加载并以bean形式被注册到容器 。
+
+`@ConditionalOnClass({ AbstractSecurityWebApplicationInitializer.class, SessionCreationPolicy.class })`：仅在特定类存在于 classpath 上时才生效（即存在特定类）。
+
+`@AutoConfigureAfter(SecurityAutoConfiguration.class)`：指定该配置类**在 SecurityAutoConfiguration 配置类应用之后应用**。
+
+```java
+
+	@Bean
+	@ConditionalOnBean(name = DEFAULT_FILTER_NAME)
+	public DelegatingFilterProxyRegistrationBean securityFilterChainRegistration(
+			SecurityProperties securityProperties) {
+		DelegatingFilterProxyRegistrationBean registration = new DelegatingFilterProxyRegistrationBean(
+				DEFAULT_FILTER_NAME);
+		registration.setOrder(securityProperties.getFilter().getOrder());
+		registration.setDispatcherTypes(getDispatcherTypes(securityProperties));
+		return registration;
+	}
+
+	private EnumSet<DispatcherType> getDispatcherTypes(SecurityProperties securityProperties) {
+		if (securityProperties.getFilter().getDispatcherTypes() == null) {
+			return null;
+		}
+		return securityProperties.getFilter().getDispatcherTypes().stream()
+				.map((type) -> DispatcherType.valueOf(type.name()))
+				.collect(Collectors.toCollection(() -> EnumSet.noneOf(DispatcherType.class)));
+	}
+
+```
+
+当存在名字叫做 `springSecurityFilterChain` 的bean时，就会往容器中注入一个DelegatingFilterProxyRegistrationBean类对象。所以SecurityFilterAutoConfiguration类对象主要用于生成DelegatingFilterProxyRegistrationBean类对象。`DelegatingFilterProxyRegistrationBean`用于是注册DelegatingFilterProxys的 bean 到 Servlet 容器。
+
+## WebSecurityConfigurerAdapter
+
+自定义配置类。
+
+![image-20240102174249308](typora文档图片/image-20240102174249308.png)
+
+WebSecurityConfigurerAdapter是为创建WebSecurityConfigurer实例提供方便的基类，该类允许开发人员通过覆盖方法进行定制。
+WebSecurityConfigurer是一个空的接口，它允许对WebSecurity进行定义，目的就是配置一个WebSecurity。
+
+从类图可以发现 `WebSecurityConfigurerAdapter` 实现了接口`SecurityConfigurer`、`SecurityBuilder`、`WebSecurityConfigurer`，使用注解 `@Order`。
+
+1. `WebSecurityConfigurer`：
+
+  ```java
+  public interface WebSecurityConfigurer<T extends SecurityBuilder<Filter>> extends SecurityConfigurer<Filter, T> {
+  }
+  ```
+
+  是一个空接口，但是它里边约束了泛型。可以发现：
+
+   1. SecurityBuilder 中的泛型 Filter，表示 SecurityBuilder 最终的目的是为了构建一个 Filter 对象出来。
+   2. SecurityConfigurer 中两个泛型，第一个表示的含义也是 SecurityBuilder 最终构建的对象。
+
+  同时这里还定义了新的泛型 T，T 需要继承自 SecurityBuilder，根据 WebSecurityConfigurerAdapter 中的定义，我们可以知道，T 就是 WebSecurity，我们也大概能猜出 WebSecurity 就是 SecurityBuilder 的子类。
+
+  所以 WebSecurityConfigurer 的目的我们可以理解为就是为了配置 WebSecurity。
+
+2. `WebSecurity`
+
+    而 `WebSecurity`继承自 `AbstractConfiguredSecurityBuilder`<Filter, WebSecurity> 同时实现了 SecurityBuilder 接口：
+
+     ```java
+     public final class WebSecurity extends AbstractConfiguredSecurityBuilder<Filter, WebSecurity>
+             implements SecurityBuilder<Filter>, ApplicationContextAware, ServletContextAware {
+    
+     ```
+
+    **官方注释为**：WebSecurity是由WebSecurityConfiguration创建的，用于创建称为Spring Security Filter Chain（springSecurityFilterChain）的FilterChainProxy。springSecurityFilterChain是DelegatingFilterProxy委托给的筛选器。可以通过创建WebSecurityConfigurer、重写WebSecurityCnfigurerAdapter或公开WebSecurityCustomizer bean来对WebSecurity进行自定义。
+
+3. `AbstractConfiguredSecurityBuilder`
+
+    首先 AbstractConfiguredSecurityBuilder 中定义了一个枚举类，将整个构建过程分为 5 种状态，也可以理解为构建过程生命周期的五个阶段，如下：
+
+    ```java
+    private enum BuildState {
+    	UNBUILT(0),
+    	INITIALIZING(1),
+    	CONFIGURING(2),
+    	BUILDING(3),
+    	BUILT(4);
+    	private final int order;
+    	BuildState(int order) {
+    		this.order = order;
+    	}
+    	public boolean isInitializing() {
+    		return INITIALIZING.order == order;
+    	}
+    	public boolean isConfigured() {
+    		return order >= CONFIGURING.order;
+    	}
+    }
+    ```
+
+    五种状态分别是 UNBUILT、INITIALIZING、CONFIGURING、BUILDING 以及 BUILT。另外还提供了两个判断方法，isInitializing 判断是否正在初始化，isConfigured 表示是否已经配置完毕。
+    
+    ```java
+    private <C extends SecurityConfigurer<O, B>> void add(C configurer) {
+    	Assert.notNull(configurer, "configurer cannot be null");
+    	Class<? extends SecurityConfigurer<O, B>> clazz = (Class<? extends SecurityConfigurer<O, B>>) configurer
+    			.getClass();
+    	synchronized (configurers) {
+    		if (buildState.isConfigured()) {
+    			throw new IllegalStateException("Cannot apply " + configurer
+    
+       + " to already built object");
+         	}
+         	List<SecurityConfigurer<O, B>> configs = allowConfigurersOfSameType ? this.configurers
+         			.get(clazz) : null;
+         	if (configs == null) {
+         		configs = new ArrayList<>(1);
+         	}
+         	configs.add(configurer);
+         	this.configurers.put(clazz, configs);
+         	if (buildState.isInitializing()) {
+         		this.configurersAddedInInitializing.add(configurer);
+         	}
+         }
+         }
+         private Collection<SecurityConfigurer<O, B>> getConfigurers() {
+         List<SecurityConfigurer<O, B>> result = new ArrayList<>();
+         for (List<SecurityConfigurer<O, B>> configs : this.configurers.values()) {
+         	result.addAll(configs);
+         }
+         return result;
+         }
+    ```
+    
+    第一个是 `add` 方法，这相当于是在收集所有的配置类。将所有的 xxxConfigure 收集起来存储到 configurers 中，将来再统一初始化并配置，configurers 本身是一个 LinkedHashMap ，key 是配置类的 class，value 是一个集合，集合里边放着 xxxConfigure 配置类。当需要对这些配置类进行集中配置的时候，会通过 getConfigurers 方法获取配置类，这个获取过程就是把 LinkedHashMap 中的 value 拿出来，放到一个集合中返回。
+    
+    另一个方法就是 doBuild 方法：
+    
+    ```java
+    
+    @Override
+    protected final O doBuild() throws Exception {
+    	synchronized (configurers) {
+    		buildState = BuildState.INITIALIZING;
+    		beforeInit();
+    		init();
+    		buildState = BuildState.CONFIGURING;
+    		beforeConfigure();
+    		configure();
+    		buildState = BuildState.BUILDING;
+    		O result = performBuild();
+    		buildState = BuildState.BUILT;
+    		return result;
+    	}
+    }
+    private void init() throws Exception {
+    	Collection<SecurityConfigurer<O, B>> configurers = getConfigurers();
+    	for (SecurityConfigurer<O, B> configurer : configurers) {
+    		configurer.init((B) this);
+    	}
+    	for (SecurityConfigurer<O, B> configurer : configurersAddedInInitializing) {
+    		configurer.init((B) this);
+    	}
+    }
+    private void configure() throws Exception {
+    	Collection<SecurityConfigurer<O, B>> configurers = getConfigurers();
+    	for (SecurityConfigurer<O, B> configurer : configurers) {
+    		configurer.configure((B) this);
+    	}
+    }
+    ```
+    
+    在 AbstractSecurityBuilder 类中，过滤器的构建被转移到 doBuild 方法上面了，不过在 AbstractSecurityBuilder 中只是定义了抽象的 doBuild 方法，具体的实现在 AbstractConfiguredSecurityBuilder。
+    
+    doBuild 方法就是一边更新状态，一边进行初始化。
+    
+    beforeInit 是一个预留方法，没有任何实现。
+    
+    init 方法就是找到所有的 xxxConfigure，挨个调用其 init 方法进行初始化。
+    
+    beforeConfigure 是一个预留方法，没有任何实现。
+    
+    configure 方法就是找到所有的 xxxConfigure，挨个调用其 configure 方法进行配置。
+    
+    最后则是 performBuild 方法，是真正的过滤器链构建方法，但是在 AbstractConfiguredSecurityBuilder 中 performBuild 方法只是一个抽象方法，具体的实现在它的子类中，也就是 WebSecurityConfigurer。
+
+4. `SecurityBuilder`
+
+    SecurityBuilder 就是用来构建过滤器链的，在 HttpSecurity 实现 SecurityBuilder 时，传入的泛型就是 DefaultSecurityFilterChain，所以 SecurityBuilder#build 方法的功能很明确，就是用来构建一个过滤器链出来，但是那个过滤器链是 Spring Security 中的。在 WebSecurityConfigurerAdapter 中定义的泛型是 SecurityBuilder，所以最终构建的是一个普通 Filter，其实就是 FilterChainProxy。
+
+5. `WebSecurity`
+
+    WebSecurity 的核心逻辑集中在 performBuild 构建方法上：
+
+    ```java
+    @Override
+    protected Filter performBuild() throws Exception {
+    	Assert.state(
+    			!securityFilterChainBuilders.isEmpty(),
+    			() -> "At least one SecurityBuilder<? extends SecurityFilterChain> needs to be specified. "
+    					+ "Typically this done by adding a @Configuration that extends WebSecurityConfigurerAdapter. "
+    					+ "More advanced users can invoke "
+    					+ WebSecurity.class.getSimpleName()
+    					+ ".addSecurityFilterChainBuilder directly");
+    	int chainSize = ignoredRequests.size() + securityFilterChainBuilders.size();
+    	List<SecurityFilterChain> securityFilterChains = new ArrayList<>(
+    			chainSize);
+    	for (RequestMatcher ignoredRequest : ignoredRequests) {
+    		securityFilterChains.add(new DefaultSecurityFilterChain(ignoredRequest));
+    	}
+    	for (SecurityBuilder<? extends SecurityFilterChain> securityFilterChainBuilder : securityFilterChainBuilders) {
+    		securityFilterChains.add(securityFilterChainBuilder.build());
+    	}
+    	FilterChainProxy filterChainProxy = new FilterChainProxy(securityFilterChains);
+    	if (httpFirewall != null) {
+    		filterChainProxy.setFirewall(httpFirewall);
+    	}
+    	filterChainProxy.afterPropertiesSet();
+    	Filter result = filterChainProxy;
+    	if (debugEnabled) {
+    		logger.warn("\n\n"
+    				+ "********************************************************************\n"
+    				+ "**********        Security debugging is enabled.       *************\n"
+    				+ "**********    This may include sensitive information.  *************\n"
+    				+ "**********      Do not use in a production system!     *************\n"
+    				+ "********************************************************************\n\n");
+    		result = new DebugFilter(filterChainProxy);
+    	}
+    	postBuildAction.run();
+    	return result;
+    }
+    
+    ```
+
+    先来说一句，这里的 performBuild 方法只有一个功能，那就是构建 FilterChainProxy，如果你还不了解什么是 FilterChainProxy，可以参考松哥之前的介绍：深入理解 FilterChainProxy【源码篇】。
+
+    把握住了这条主线，我们再来看方法的实现就很容易了。
+
+    首先统计过滤器链的总条数，总条数包括两个方面，一个是 ignoredRequests，这是忽略的请求，通过 WebSecurity 配置的忽略请求，松哥之前介绍过，参见：Spring Security 两种资源放行策略，千万别用错了！，另一个则是 securityFilterChainBuilders，也就是我们通过 HttpSecurity 配置的过滤器链，有几个就算几个。
+    创建 securityFilterChains 集合，并且遍历上面提到的两种类型的过滤器链，并将过滤器链放入 securityFilterChains 集合中。
+    我在深入理解 HttpSecurity【源码篇】一文中介绍过，HttpSecurity 构建出来的过滤器链对象就是 DefaultSecurityFilterChain，所以可以直接将 build 结果放入 securityFilterChains 中，而 ignoredRequests 中保存的则需要重构一下才可以存入 securityFilterChains。
+    securityFilterChains 中有数据之后，接下来创建一个 FilterChainProxy。
+    给新建的 FilterChainProxy 配置上防火墙，防火墙的介绍参考松哥之前的：Spring Security 自带防火墙！你都不知道自己的系统有多安全！。
+    最后我们返回的就是 FilterChainProxy 的实例。
+    从这段分析中，我们可以看出来 WebSecurity 和 HttpSecurity 的区别：
+
+    HttpSecurity 目的是构建过滤器链，一个 HttpSecurity 对象构建一条过滤器链，一个过滤器链中有 N 个过滤器，HttpSecurity 所做的事情实际上就是在配置这 N 个过滤器。
+    WebSecurity 目的是构建 FilterChainProxy，一个 FilterChainProxy 中包含有多个过滤器链和一个 Firewall。
+    这就是 WebSecurity 的主要作用，核心方法是 performBuild。
+
+### WebSecurityConfigurerAdapter
+
+有三个主要方法：
+
+![image-20240102191648016](typora文档图片/image-20240102191648016.png)
+
+#### 认证管理器配置方法
+
+`void configure(AuthenticationManagerBuilder auth)`
+
+用来配置认证管理器 `AuthenticationManager` 。说白了就是所有 UserDetails 相关的它都管，包含 `PasswordEncoder` 密码机。
+
+#### 核心过滤器配置方法
+
+`void configure(WebSecurity web)`
+
+用来配置 WebSecurity 。而 WebSecurity 是基于 Servlet Filter 用来配置 springSecurityFilterChain 。而 springSecurityFilterChain 又 被委托给了 Spring Security 核心过滤器 Bean DelegatingFilterProxy 。 相关逻辑你可以在 WebSecurityConfiguration 中找到。我们一般不会过多来自定义 WebSecurity , 使用较多的使其 ignoring() 方法用来忽略 Spring Security 对静态资源的控制。
+
+#### 安全过滤器链配置方法
+
+`void configure(HttpSecurity http)`
+
+用来配置 `HttpSecurity`。 HttpSecurity 用于构建一个安全过滤器链 SecurityFilterChain 。 SecurityFilterChain 最终 被注入核心过滤器 。 HttpSecurity 有许多我们需要的配置。我们可以通过它来进行自定义安全访问策略。
+
+## HttpSecurity 配置
+
+前面的`SpringBootWebSecurityConfiguration`类里提到过，Spring Security 在 Spring Boot 中的默认配置：
+
+```java
+http
+.authorizeRequests()
+.anyRequest().authenticated()
+.and()
+.formLogin().and()
+.httpBasic();
+```
+
+- 所有的请求访问都需要被授权。
+- 使用 form 表单进行登陆(默认路径为 /login )，也就是默认的登录页。
+- 防止 CSRF 攻击、 XSS 攻击。
+- 启用 HTTP Basic 认证。
+
+HttpSecurity 使用了 builder 的构建方式来灵活制定访问策略。最早基于 XML 标签对 HttpSecurity 进行配置。现在大部分使用 javaConfig 方式。常用的方法解读如下：
+openidLogin()	用于基于 OpenId 的验证
+headers()	将安全标头添加到响应
+cors()	配置跨域资源共享（ CORS ）
+sessionManagement()	允许配置会话管理
+portMapper()	允许配置一个PortMapper(HttpSecurity#(getSharedObject(class)))，其他提供SecurityConfigurer的对象使用 PortMapper 从 HTTP 重定向到 HTTPS 或者从 HTTPS 重定向到 HTTP。默认情况下，Spring Security使用一个PortMapperImpl映射 HTTP 端口8080到 HTTPS 端口8443，HTTP 端口80到 HTTPS 端口443
+jee()	配置基于容器的预认证。 在这种情况下，认证由Servlet容器管理
+x509()	配置基于x509的认证
+rememberMe	允许配置“记住我”的验证
+authorizeRequests()	允许基于使用HttpServletRequest限制访问
+requestCache()	允许配置请求缓存
+exceptionHandling()	允许配置错误处理
+securityContext()	在HttpServletRequests之间的SecurityContextHolder上设置SecurityContext的管理。 当使用WebSecurityConfigurerAdapter时，这将自动应用
+servletApi()	将HttpServletRequest方法与在其上找到的值集成到SecurityContext中。 当使用WebSecurityConfigurerAdapter时，这将自动应用
+csrf()	添加 CSRF 支持，使用WebSecurityConfigurerAdapter时，默认启用
+logout()	添加退出登录支持。当使用WebSecurityConfigurerAdapter时，这将自动应用。默认情况是，访问URL”/ logout”，使HTTP Session无效来清除用户，清除已配置的任何#rememberMe()身份验证，清除SecurityContextHolder，然后重定向到”/login?success”
+anonymous()	允许配置匿名用户的表示方法。 当与WebSecurityConfigurerAdapter结合使用时，这将自动应用。 默认情况下，匿名用户将使用org.springframework.security.authentication.AnonymousAuthenticationToken表示，并包含角色 “ROLE_ANONYMOUS”
+formLogin()	指定支持基于表单的身份验证。如果未指定FormLoginConfigurer#loginPage(String)，则将生成默认登录页面
+oauth2Login()	根据外部OAuth 2.0或OpenID Connect 1.0提供程序配置身份验证
+requiresChannel()	配置通道安全。为了使该配置有用，必须提供至少一个到所需信道的映射
+httpBasic()	配置 Http Basic 验证
+addFilterAt()	在指定的Filter类的位置添加过滤器
+
+## URI中的 Ant 风格
+
+### Ant 风格
+
+Ant 风格就是一种路径匹配表达式。主要用来对 uri 的匹配。其实跟正则表达式作用是一样的，只不过正则表达式适用面更加宽泛， Ant 仅仅用于路径匹配。 
+
+### Ant 通配符
+
+Ant 中的通配符有三种：
+
+- `?` 匹配任何单字符；
+- `*` 匹配0或者任意数量的字符；
+- `**` 匹配0或者更多的目录
+
+注意：单个 `*` 是在一个目录内进行匹配。 而 `**` 是可以匹配多个目录，一定不要迷糊。
+
+### Ant 通配符示例
+
+![image-20240102162229003](typora文档图片/image-20240102162229003.png)
+
+### 最长匹配原则
+
+`*` 和 `**` 是有冲突的情况存在的。为了解决这种冲突就规定了最长匹配原则(has more characters)。 一旦一个 uri 同时符合两个 Ant 匹配那么走匹配规则字符最多的。
+
+原因：因为字符越长信息越多就越具体。比如 /ant/a/path 同时满足 `/**/path` 和 `/ant/*/path` 那么 走 `/ant/*/path`。
+
+**Spring MVC 中的 Ant 风格**
+
+在控制器中写如下接口：
+
+```java
+/**
+* ant style test.
+*
+* @return the string
+*/
+@GetMapping("/?ant")
+public String ant() {
+    return "ant";
+}
+```
+
+你使用任意合法 uri 字符替代 ? 发现都可以匹配，比如 /bant 。 还有Spring MVC 的一些过滤器注册、格式化器注册都用到了 Ant 风格。
+
+**Spring Security 中的 Ant 风格**
+
+在 Spring Security 中 WebSecurityConfigurerAdapter 中的可以通过如下配置进行路由权限访问控制：
+
+```java
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Autowired
+    public void configureGlobal(AuthenticationManagerBuilder authenticationManagerBuilder) throws Exception {
+        authenticationManagerBuilder.inMemoryAuthentication().withUser("admin").password("admin").roles("USER");
+    }
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.authorizeRequests()
+            //放行静态资源 首页
+            .antMatchers("/index.html","/static/**").permitAll()
+            .anyRequest().authenticated();
+    }
+}
+```
+
+上面 Spring Security 的配置中在 antMatchers 方法中通过 Ant 通配符来控制了资源的访问权限。这是接口权限控制的重要组成部分。
+
+## 过滤器
+
+![image-20231225134414405](typora文档图片/image-20231225134414405.png)
+
+### 基本过滤器
+
+在 Spring Security 中 `认证、授权` 等功能都是基于 **过滤器** 完成的。
+
+默认过滤器并不是直接放在 Web 项目的原生过滤器链中，而是通过一个
+FlterChainProxy 来统一管理。Spring Security 中的过滤器链通过 FilterChainProxy 嵌入到 Web项目的原生过滤器链中。FilterChainProxy 作为一个顶层的管理者，将统一管理 Security Filter。FilterChainProxy 本身是通过 Spring 框架提供的 DelegatingFilterProxy 整合到原生的过滤器链中。
+
+debug调试WebSecurityConfiguration的下面的代码，查看变量值：
+
+![image-20240102201231729](typora文档图片/image-20240102201231729.png)
+
+![image-20240102200944373](typora文档图片/image-20240102200944373.png)
+
+Spring Security 提供了 30 多个过滤器。默认情况下Spring Boot 在对 Spring Security 进入自动化配置时，会创建一个名为 SpringSecurityFilerChain 的过滤器，并注入到 Spring 容器中，这个过滤器将负责所有的安全管理，包括用户认证、授权、重定向到登录页面等。一共会默认加载15个过滤器。
+
+**三个重点过滤器**：
+
+1. `FilterSecurityInterceptor`，是一个方法级的权限过滤器, 基本位于过滤链的最底部。
+
+    ```java
+    public class FilterSecurityInterceptor extends AbstractSecurityInterceptor implements Filter {
+        private static final String FILTER_APPLIED = "__spring_security_filterSecurityInterceptor_filterApplied";
+        private FilterInvocationSecurityMetadataSource securityMetadataSource;
+        private boolean observeOncePerRequest = true;
+    
+        public FilterSecurityInterceptor() {
+        }
+    
+        public void init(FilterConfig arg0) {
+        }
+    
+        public void destroy() {
+        }
+    
+        public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
+            this.invoke(new FilterInvocation(request, response, chain));
+        }
+    ```
+
+    实现了Filter接口，所以是一个过滤器：
+
+    ```java
+    public interface Filter {
+        default void init(FilterConfig filterConfig) throws ServletException {
+        }
+    
+        void doFilter(ServletRequest var1, ServletResponse var2, FilterChain var3) throws IOException, ServletException;
+    
+        default void destroy() {
+        }
+    }
+    ```
+
+    每一个过滤器都必须实现`init`、`doFilter`、`destory` 方法，表示创建、销毁、以及过滤行为。
+
+    可以看到，FilterSecurityInterceptor在`doFilter`方法中执行了 `invoke`方法：
+
+    ```java
+        public void invoke(FilterInvocation filterInvocation) throws IOException, ServletException {
+            if (this.isApplied(filterInvocation) && this.observeOncePerRequest) {
+                filterInvocation.getChain().doFilter(filterInvocation.getRequest(), filterInvocation.getResponse());
+            } else {
+                if (filterInvocation.getRequest() != null && this.observeOncePerRequest) {
+                    filterInvocation.getRequest().setAttribute("__spring_security_filterSecurityInterceptor_filterApplied", Boolean.TRUE);
+                }
+    
+                InterceptorStatusToken token = super.beforeInvocation(filterInvocation);
+    
+                try {
+                    filterInvocation.getChain().doFilter(filterInvocation.getRequest(), filterInvocation.getResponse());
+                } finally {
+                    super.finallyInvocation(token);
+                }
+    
+                super.afterInvocation(token, (Object)null);
+            }
+        }
+    ```
+
+    先判断该请求是否已经调用过过滤器，如果掉过则直接放行；如果是第一次调用，需要执行安全检查；然后用`beforeInvocation`查看之前的过滤器是否通过，接着：
+
+    ```java
+     filterInvocation.getChain().doFilter(filterInvocation.getRequest(), filterInvocation.getResponse());
+    ```
+
+    调用真正的过滤服务。
+
+2. `ExceptionTranslationFilter`：是个异常过滤器，用来处理在认证授权过程中抛出的异常。
+
+    ```java
+    	private void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+    			throws IOException, ServletException {
+    		try {
+    			chain.doFilter(request, response);
+    		}
+    		catch (IOException ex) {
+    			throw ex;
+    		}
+    		catch (Exception ex) {
+    			// 尝试从堆栈中提取SpringSecurityException
+    			Throwable[] causeChain = this.throwableAnalyzer.determineCauseChain(ex);
+    			RuntimeException securityException = (AuthenticationException) this.throwableAnalyzer
+    					.getFirstThrowableOfType(AuthenticationException.class, causeChain);
+    			if (securityException == null) {
+    				securityException = (AccessDeniedException) this.throwableAnalyzer
+    						.getFirstThrowableOfType(AccessDeniedException.class, causeChain);
+    			}
+    			if (securityException == null) {
+    				rethrow(ex);
+    			}
+    			if (response.isCommitted()) {
+    				throw new ServletException("Unable to handle the Spring Security Exception "
+    						+ "because the response is already committed.", ex);
+    			}
+    			handleSpringSecurityException(request, response, chain, securityException);
+    		}
+    	}
+    ```
+
+3. `UsernamePasswordAuthenticationFilter`：对/login 的 POST 请求做拦截，校验表单中用户名，密码。
+
+    ```java
+    	@Override
+    	public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response)
+    			throws AuthenticationException {
+    		if (this.postOnly && !request.getMethod().equals("POST")) {
+    			throw new AuthenticationServiceException("Authentication method not supported: " + request.getMethod());
+    		}
+    		String username = obtainUsername(request);
+    		username = (username != null) ? username : "";
+    		username = username.trim();
+    		String password = obtainPassword(request);
+    		password = (password != null) ? password : "";
+    		UsernamePasswordAuthenticationToken authRequest = new UsernamePasswordAuthenticationToken(username, password);
+    		// 允许子类设置“details”属性
+    		setDetails(request, authRequest);
+    		return this.getAuthenticationManager().authenticate(authRequest);
+    	}
+    ```
+
+    对post请求的账户密码进行校验。
+
+### DelegatingFilterProxy
+
+DelegatingFilterProxy是一个Servlet过滤器，它**代理了Servlet Filter**。这样，被代理的Filter就可以享受Spring的依赖注入和生命周期管理功能。即”管理“filter。
+
+DelegatingFilterProxy 和普通 Filter 的区别：
+
+- DelegatingFilterProxy 是一个**代理类**，它**本身不实现** Filter 接口，而是将 Filter 的功能委托给一个 Spring 容器管理的 Filter 实现类。
+- DelegatingFilterProxy 可以让 Filter 实现类享受 Spring 的依赖注入和生命周期管理的优势，而普通 Filter 则需要自己管理这些。
+- DelegatingFilterProxy 可以根据 `targetBeanName` 属性来指定要代理的 Filter 实现类的名称，如果不指定，则默认使用 filter-name 作为 bean 名称。
+- DelegatingFilterProxy 可以和 Spring Security 配合使用，实现安全过滤的功能。
+
+![image-20240102205628598](typora文档图片/image-20240102205628598.png)
+
+在spring security中，`DelegatingFilterProxy` 是整个Spring Security 过滤器链的**入口**，拦截所有的请求；最后交给 `FilterChainProxy` 处理
+
+从类图可以看出，`DelegatingFilterProxy` 继承于抽象类GenericFilterBean，间接实现了 Filter接口。
+
+DelegatingFilterProxy的`initFilterBean`
+
+```java
+// 初始化过滤器 bean
+protected void initFilterBean() throws ServletException {
+        // 在代理监视器对象上同步
+        synchronized(this.delegateMonitor) {
+                    // 如果代理是空的
+            if (this.delegate == null) {
+                if (this.targetBeanName == null) {
+                    // 如果没有设置targentBeanName属性，则直接根据Filter名称来查找
+                    this.targetBeanName = this.getFilterName();
+                }
+
+                WebApplicationContext wac = this.findWebApplicationContext();
+                if (wac != null) {
+                    // 从 Spring容器中找到 代理的filter
+                    this.delegate = this.initDelegate(wac);
+                }
+            }
+
+        }
+    }
+```
+
+其中，`getFilterName` 在GenericFilterBean类中，作用是 获取代理的filter在spring容器中配置的名称
+
+```java
+@Nullable // 表示
+protected String getFilterName() {
+    //获取代理的filter在Spring容器中配置的ID
+    return this.filterConfig != null ? this.filterConfig.getFilterName() : this.beanName;
+}
+```
+
+`initDelegate` 作用是获取代理的filter
+
+```java
+protected Filter initDelegate(WebApplicationContext wac) throws ServletException {
+    String targetBeanName = this.getTargetBeanName();
+    Assert.state(targetBeanName != null, "No target bean name set");
+    Filter delegate = (Filter)wac.getBean(targetBeanName, Filter.class);
+    // 通过targetFilterLifecycle的属性 指定 是否要将servlet过滤器的生命周期方法（init和destroy）委托给Spring容器中的bean。
+    // 如果返回true，由servlet容器管理过滤器的生命周期。
+    // 如果返回false，由依赖Spring容器来管理bean的生命周期。
+    if (this.isTargetFilterLifecycle()) {
+        delegate.init(this.getFilterConfig());
+    }
+
+    return delegate;
+}
+```
+
+`doFilter`：使用了**双重锁检测**模式来初始化一个代理filter，然后调用代理filter的doFilter方法：
+
+```java
+public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+    Filter delegateToUse = this.delegate;
+
+    if (delegateToUse == null) {
+        synchronized(this.delegateMonitor) {
+            delegateToUse = this.delegate;
+            if (delegateToUse == null) {
+                WebApplicationContext wac = this.findWebApplicationContext();
+                if (wac == null) {
+                    throw new IllegalStateException("No WebApplicationContext found: no ContextLoaderListener or DispatcherServlet registered?");
+                }
+
+                // 获取代理的filter
+                delegateToUse = this.initDelegate(wac);
+            }
+
+            this.delegate = delegateToUse;
+        }
+    }
+
+    // 执行代理filter的doFilter方法
+    this.invokeDelegate(delegateToUse, request, response, filterChain);
+}
+```
+
+DelegatingFilterProxy是代理，本身不搞过滤器的工作，它的dofilter方法执行的是代理的过滤器的doFilter方法。
+
+### UserDetailsService 接口
+
+前面讲过，当什么也没有配置的时候，账号和密码是由 Spring Security 定义生成的。而在实际项目中账号和密码都是从数据库中查询出来的。 所以我们要通过自定义逻辑控制认证逻辑。
+
+如果需要自定义逻辑（查询数据库的用户）时，只需要实现 UserDetailsService 接口即可。该接口定义如下：
+
+```java
+public interface UserDetailsService {
+	UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
+}
+```
+
+声明了方法 `loadUserByUsername`，即根据用户名返回用户，返回值类型是 `UserDetails`，这个类是系统默认的用户 “**主体**”。
+
+```java
+public interface UserDetails extends Serializable {
+	// 表示获取登录用户所有权限
+	Collection<? extends GrantedAuthority> getAuthorities();
+	// 表示获取密码
+	String getPassword();
+	// 表示获取用户名
+	String getUsername();
+	// 表示判断账户是否过期
+	boolean isAccountNonExpired();
+	// 表示判断账户是否被锁定
+	boolean isAccountNonLocked();
+	// 表示凭证{密码}是否过期
+	boolean isCredentialsNonExpired();
+	// 表示当前用户是否可用
+	boolean isEnabled();
+}
+```
+
+![image-20240102212208556](typora文档图片/image-20240102212208556.png)
+
+UserDetails接口的实现类如上，以后我们只需要使用 User 这个实体类即可，或者自己编写一个继承`UserDetails`的用户类。
+
+`UserDetailsService` 可以理解为我们平时用的service层，用于从数据库获取信息。
+
+spring security中对账户密码进行处理的过滤器是 `UsernamePasswordAuthenticationFilter` ，即对账户密码进行校验，如果我们想自己实现就需要继承该类，然后在该类中 `UserDetailsService` 进行实现，返回User对象（spring security提供的）。
+
+### PasswordEncoder 接口
+
+```java
+public interface PasswordEncoder {
+    // 将原始密码编码
+	String encode(CharSequence rawPassword);
+    // 将原始密码和加密后的密码匹配
+	boolean matches(CharSequence rawPassword, String encodedPassword);
+    // 表示如果解析的密码能够再次进行解析且达到更安全的结果则返回 true，否则返回false。默认返回 false。
+	default boolean upgradeEncoding(String encodedPassword) {
+		return false;
+	}
+}
+```
+
+该类的主要实现类：
+
+![image-20240102213516743](typora文档图片/image-20240102213516743.png)
+
+`BCryptPasswordEncoder` 就是我们常用的，前面提到过。
+
+### UsernamePasswordAuthenticationFilter
+
+该过滤器主要处理身份验证表单提交。
+
+在Spring Security 3.0之前调用了AuthenticationProcessingFilter。
+
+登录表单必须为此筛选器提供两个参数：用户名和密码。
+
+默认情况下参数名为：username、password。
+
+还可以**通过设置usernameParameter和passwordParameter属性**来更改参数名称，在配置类的configure方法中修改，见下面。
+
+默认情况下，此筛选器会响应路径 `/login`。
+
+```java
+public class UsernamePasswordAuthenticationFilter extends AbstractAuthenticationProcessingFilter {
+
+   public static final String SPRING_SECURITY_FORM_USERNAME_KEY = "username";
+
+   public static final String SPRING_SECURITY_FORM_PASSWORD_KEY = "password";
+
+   private static final AntPathRequestMatcher DEFAULT_ANT_PATH_REQUEST_MATCHER = new AntPathRequestMatcher("/login",
+         "POST");
+
+   private String usernameParameter = SPRING_SECURITY_FORM_USERNAME_KEY;
+
+   private String passwordParameter = SPRING_SECURITY_FORM_PASSWORD_KEY;
+
+   private boolean postOnly = true;
+```
+
+## SpringSecurity Web 权限方案
+
+### 基础权限
+
+前面我们直接已经实现 `UserDetailsService` 接口实现了连接数据库。
+
+配置类如下：
+
+两部分：密码加密 和 `configure`配置。
+
+```java
+@Configuration
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+
+    @Bean
+    public PasswordEncoder password() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.authorizeRequests()
+                .antMatchers("index") // 匹配到的路径执行permitAll，即全部放行，一般用于静态资源
+                .permitAll()
+                .anyRequest() // 任何请求都要authenticated() 即都要先认证
+                .authenticated();
+    }
+}
+```
+
+其中，`configure`配置：
+
+**登录页配置**
+
+```java
+// 配置认证
+http.formLogin()  // 表示采用form表单认证
+    .loginPage("/index") // 配置哪个 url 为登录页面
+	.loginProcessingUrl("/login") // 设置哪个是登录的 url。
+	.successForwardUrl("/success") // 登录成功之后跳转到哪个 url
+	.failureForwardUrl("/fail");// 登录失败之后跳转到哪个 url
+
+http.authorizeRequests()
+    .antMatchers("/layui/**","/index") //表示配置请求路径
+	.permitAll() // 指定 URL 无需保护。
+	.anyRequest() // 其他请求
+	.authenticated(); //需要认证
+
+	// 关闭 csrf
+	http.csrf().disable();
+}
+```
+
+**修改默认的登录参数名**
+
+```java
+// 配置认证
+http.formLogin()  // 表示采用form表单认证
+    .loginPage("/index") // 配置哪个 url 为登录页面
+	.loginProcessingUrl("/login") // 设置哪个是登录的 url。
+	.successForwardUrl("/success") // 登录成功之后跳转到哪个 url
+	.failureForwardUrl("/fail")// 登录失败之后跳转到哪个 url
+    ---- 修改账户密码的参数名----
+	.usernameParameter("name")
+	.passwordParameter("pwd");
+```
+
+### 角色或权限的访问
+
+在配置文件中固定实现的权限管理见入门案例的授权。
+
+这里展示**基于数据库实现权限认证**。
+
+
+
+## 认证方式
+
+基本
+
+formlogin等等
+
+
+
+
+
