@@ -1875,6 +1875,10 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 默认过滤器并不是直接放在 Web 项目的原生过滤器链中，而是通过一个
 FlterChainProxy 来统一管理。Spring Security 中的过滤器链通过 FilterChainProxy 嵌入到 Web项目的原生过滤器链中。FilterChainProxy 作为一个顶层的管理者，将统一管理 Security Filter。FilterChainProxy 本身是通过 Spring 框架提供的 DelegatingFilterProxy 整合到原生的过滤器链中。
 
+即 生成一个名字为 `springSecurityFilterChain`，类型为 `DelegatingFilterProxy` 类型的实例，然后这个实例会自动加入到 Servlet 容器的过滤器链中。
+
+当有请求达到 `Servlet` 容器时，会依次按照过滤器声明和映射的顺序，依次执行过滤器的逻辑。
+
 debug调试WebSecurityConfiguration的下面的代码，查看变量值：
 
 ![image-20240102201231729](typora文档图片/image-20240102201231729.png)
@@ -2012,20 +2016,41 @@ Spring Security 提供了 30 多个过滤器。默认情况下Spring Boot 在对
 
 ### DelegatingFilterProxy
 
-DelegatingFilterProxy是一个Servlet过滤器，它**代理了Servlet Filter**。这样，被代理的Filter就可以享受Spring的依赖注入和生命周期管理功能。即”管理“filter。
+DelegatingFilterProxy是一个Servlet过滤器，它**代理了Servlet Filter**。这样，被代理的Filter就可以享受Spring的依赖注入和生命周期管理功能。即”管理“filter。它会将请求委托给目标过滤器来处理。
+
+`DelegatingFilterProxy` 部分属性：
+
+```java
+	@Nullable
+	private String targetBeanName;
+
+	private boolean targetFilterLifecycle = false;
+```
+
+其中，`targetFilterLifecycle` 参数是在 `DelegatingFilterProxy` 的构造函数中使用的一个布尔值参数。它用于指定是否由 `DelegatingFilterProxy` 负责管理目标过滤器的生命周期。
+
+如果将 `targetFilterLifecycle` 参数设置为 `true`，则 `DelegatingFilterProxy` 将负责调用目标过滤器的 `init()` 和 `destroy()` 方法。这意味着 `DelegatingFilterProxy` 将在容器启动时自动调用目标过滤器的 `init()` 方法，并在容器关闭时调用目标过滤器的 `destroy()` 方法。
+
+如果将 `targetFilterLifecycle` 参数设置为 `false`，则 `DelegatingFilterProxy` 将不会管理目标过滤器的生命周期。这意味着你需要手动调用目标过滤器的 `init()` 和 `destroy()` 方法，确保它们在适当的时候被调用。
+
+默认情况下，`targetFilterLifecycle` 参数被设置为 `false`，即 `DelegatingFilterProxy` 不会管理目标过滤器的生命周期。如果你希望 `DelegatingFilterProxy` 管理目标过滤器的生命周期，你可以将 `targetFilterLifecycle` 参数设置为 `true`。
 
 DelegatingFilterProxy 和普通 Filter 的区别：
 
 - DelegatingFilterProxy 是一个**代理类**，它**本身不实现** Filter 接口，而是将 Filter 的功能委托给一个 Spring 容器管理的 Filter 实现类。
 - DelegatingFilterProxy 可以让 Filter 实现类享受 Spring 的依赖注入和生命周期管理的优势，而普通 Filter 则需要自己管理这些。
-- DelegatingFilterProxy 可以根据 `targetBeanName` 属性来指定要代理的 Filter 实现类的名称，如果不指定，则默认使用 filter-name 作为 bean 名称。
+- DelegatingFilterProxy 可以**根据 `targetBeanName` 属性来指定要代理的 Filter 实现类的名称**，如果不指定，则默认使用 filter-name 作为 bean 名称。当 `DelegatingFilterProxy` 接收到请求时，它将查找 Spring 容器中与 `targetBeanName` 参数匹配的目标过滤器的 bean。然后，`DelegatingFilterProxy` 将委托实际的过滤工作给找到的目标过滤器实例。
 - DelegatingFilterProxy 可以和 Spring Security 配合使用，实现安全过滤的功能。
 
 ![image-20240102205628598](typora文档图片/image-20240102205628598.png)
 
-在spring security中，`DelegatingFilterProxy` 是整个Spring Security 过滤器链的**入口**，拦截所有的请求；最后交给 `FilterChainProxy` 处理
+在spring security中，`DelegatingFilterProxy` 是整个Spring Security 过滤器链的**入口**，拦截所有的请求；最后交给 `FilterChainProxy` 处理。
+
+filter的三大件：init()、doFilter()、destroy()。
 
 从类图可以看出，`DelegatingFilterProxy` 继承于抽象类GenericFilterBean，间接实现了 Filter接口。
+
+`init` 是由父类抽象类GenericFilterBean实现，在init里调用了initFilterBean，如下。
 
 DelegatingFilterProxy的`initFilterBean`
 
@@ -2040,7 +2065,7 @@ protected void initFilterBean() throws ServletException {
                     // 如果没有设置targentBeanName属性，则直接根据Filter名称来查找
                     this.targetBeanName = this.getFilterName();
                 }
-
+                // 调用 findWebApplicationContext，通过 WebApplicationContextUtils 获取对应的应用上下文，将 DelegatingFilterProxy 和 spring 关联起来
                 WebApplicationContext wac = this.findWebApplicationContext();
                 if (wac != null) {
                     // 从 Spring容器中找到 代理的filter
@@ -2109,6 +2134,30 @@ public void doFilter(ServletRequest request, ServletResponse response, FilterCha
 ```
 
 DelegatingFilterProxy是代理，本身不搞过滤器的工作，它的dofilter方法执行的是代理的过滤器的doFilter方法。
+
+`destroy`：
+
+```java
+@Override
+public void destroy() {
+    Filter delegateToUse = this.delegate;
+    if (delegateToUse != null) {
+        destroyDelegate(delegateToUse);
+    }
+}
+
+protected void destroyDelegate(Filter delegate) {
+    if (isTargetFilterLifecycle()) {
+        delegate.destroy();
+    }
+}
+```
+
+即根据 `targetFilterLifecycle` 的值判断是否交给代理的过滤器进行处理。
+
+**`GenericFilterBean` 继承的 `Aware` 接口有什么用**
+
+虽然说 `DelegatingFilterProxy` 继承了 `GenericFilterBean`，但是`DelegatingFilterProxy` 实例不是 `spring bean`，不受 `spring` 控制，当然是谁继承 `GenericFilterBean`，并声明为 `spring bean` 时，就会通过 `spring bean` 的声明周期，享受各种 `Aware` 调用。
 
 ### UserDetailsService 接口
 
@@ -2412,11 +2461,376 @@ http.logout()
 
 
 
-## 认证方式
+## 认证
 
-基本
+![image-20240109101022385](typora文档图片/image-20240109101022385.png)
 
-formlogin等等
+认证包含三个模块`AuthenticationManager`， `Authentication`，`SecurityContextHolder`。
+
+### Authentication
+
+```java
+public interface Authentication extends Principal, Serializable {
+    // 由AuthenticationManager（用于验证Authentication请求）设置，用于指示已授予主体的权限
+    Collection<? extends GrantedAuthority> getAuthorities();
+    // 证明主体的凭据
+	// 通常是一个密码，但可以是与AuthenticationManager相关的任何内容
+  	Object getCredentials();
+	/**
+	 * 存储有关身份验证请求的其他详细信息
+	 * 可能是IP地址、证书序列号等
+	 */
+    Object getDetails();
+    /**
+	 * 被认证的主体的身份
+	 * 在使用用户名和密码的身份验证请求情况下，这是用户名
+	 */
+    Object getPrincipal();
+ 	/**
+	 * 用于向AbstractSecurityInterceptor指示它是否应该向AuthenticationManager提供身份验证令牌
+	 * 通常，AuthenticationManager将在身份验证成功后返回一个不可变的身份验证令牌
+	 * 在这种情况下，该令牌的此方法可以安全地返回true
+	 * 返回true将提高性能，因为不再需要为每个请求调用AuthenticationManager
+	 * 出于安全原因，这个接口的实现应该非常小心地从这个方法返回true
+	 * 除非它们是不可变的，或者有某种方式确保属性自最初创建以来没有被更改
+	 */
+    boolean isAuthenticated();
+	/**
+	 * 实现应始终允许使用false参数调用此方法
+	 * 可以使用它来指定不应信任的身份验证令牌
+	 */
+    void setAuthenticated(boolean isAuthenticated) throws IllegalArgumentException;
+
+}
+```
+
+`Authentication`接口继承`Principal`接口，`Principal`接口表示主体的抽象概念，可用于表示任何实体。一般用来表示账号。
+
+`Authentication` 的实现类：
+
+![image-20240109100459160](typora文档图片/image-20240109100459160.png)
+
+**AbstractAuthenticationToken**
+
+实现Authentication接口的抽象类，剩下七个都是基于该抽象类的实现。
+
+AbstractAuthenticationToken的构造方法：
+
+```java
+public AbstractAuthenticationToken(Collection<? extends GrantedAuthority> authorities) {
+		if (authorities == null) {
+			this.authorities = AuthorityUtils.NO_AUTHORITIES;
+			return;
+		}
+		for (GrantedAuthority a : authorities) {
+			Assert.notNull(a, "Authorities collection cannot contain any null elements");
+		}
+		this.authorities = Collections.unmodifiableList(new ArrayList<>(authorities));
+	}
+```
+
+即 AbstractAuthenticationToken 是根据提供的权限authorities来创建令牌的。
+
+其余的七种实现通过不同方式认证时，使用的不同的实现类存储认证成功或待认证的用户信息。比如下面的通过账号和密码。
+
+**UsernamePasswordAuthenticationToken**
+
+Authentication的实现，继承`AbstractAuthenticationToken`抽象类，旨在简单地表示用户名和密码。`principal`和`credentials`属性应设置为通过其`toString`方法提供相应属性的`Object`，最简单的就是`String`类型。
+
+构造方法1：
+
+```java
+	public UsernamePasswordAuthenticationToken(Object principal, Object credentials) {
+		super(null);
+		this.principal = principal; // 账号
+		this.credentials = credentials; // 密码
+		setAuthenticated(false);
+	}
+```
+
+该构造方法只是根据主体 principal（常指用户名）和凭据 credentials（常指密码）生成的Token令牌并没有认证任何权限。
+
+构造方法2：
+
+```java
+	public UsernamePasswordAuthenticationToken(Object principal, Object credentials,
+			Collection<? extends GrantedAuthority> authorities) {
+		super(authorities);
+		this.principal = principal;
+		this.credentials = credentials;
+		super.setAuthenticated(true); // must use super, as we override
+	}
+```
+
+此方法由`AuthenticationManager` 或 `AuthenticationProvider` 生成可信的（即isAuthenticated（）=true）身份验证令牌。并且最后调用super.setAuthenticated()设置为true，用户已认证成功。该方法表明该Token认证成功且有效。
+
+可以看出，`Authentication`的职责有两个，第一个是封装验证请求的参数，第二个便是封装用户的权限信息。
+
+**RememberMeAuthenticationToken**
+
+表示需要记住的`Authentication`，需要记住的`Authentication`必须提供完全有效的`Authentication` ，包括适用的`GrantedAuthority`。
+
+使用记住我选项进行登录认证。
+
+### AuthenticationManager
+
+```java
+public interface AuthenticationManager {
+   Authentication authenticate(Authentication authentication) throws AuthenticationException;
+}
+```
+
+AuthenticationManager 是定义 Spring Security 的过滤器如何执行Authentication 身份验证的 API。
+
+即 **认证** 是由 AuthenticationManager 接口来负责的。
+
+从源码可以看出，AuthenticationManager 中定义了一个方法 authenticate 方法 传入参数是Authentication （一个**不完整**的Authentication ），返回 Authentication 表示认证成功 （一个**完整**的Authentication ）
+返回 AuthenticationException 异常，表示认证失败。
+
+`AuthenticationManager` 的实现类：
+
+![image-20240109102059379](typora文档图片/image-20240109102059379.png)
+
+在 `ProviderManager` 中管理了众多 `AuthenticationProvider` 实例。即 `ProviderManager` 本身不处理认证请求，而是将任务委托给一个配置好的 `AuthenticationProvider` 的列表，其中每一个 AuthenticationProvider 按序确认能否完成认证，每个provider如果认证失败，会抛出一个异常，如果认证通过，则会返回一个 Authentication 对象。
+
+在一次完整的认证流程中，Spring Security 允许存在多个 `AuthenticationProvider` ，用来**实现多种认证方式**，这些 AuthenticationProvider 都是由 ProviderManager 进行统一管理的。
+
+![image-20240109134108389](typora文档图片/image-20240109134108389.png)
+
+`ProviderManager`：
+
+```java
+public class ProviderManager implements AuthenticationManager, MessageSourceAware, InitializingBean {
+	。。。。。
+    private List<AuthenticationProvider> providers = Collections.emptyList();
+    
+	public ProviderManager(AuthenticationProvider... providers) {
+		this(Arrays.asList(providers), null);
+	}
+
+	public ProviderManager(List<AuthenticationProvider> providers) {
+		this(providers, null);
+	}
+
+	public ProviderManager(List<AuthenticationProvider> providers, AuthenticationManager parent) {
+		Assert.notNull(providers, "providers list cannot be null");
+		this.providers = providers;
+		this.parent = parent;
+		checkState();
+	}
+    ------
+        重写了 authenticate 
+    -----
+    public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+		Class<? extends Authentication> toTest = authentication.getClass();
+		AuthenticationException lastException = null;
+		AuthenticationException parentException = null;
+		Authentication result = null;
+		Authentication parentResult = null;
+		int currentPosition = 0;
+		int size = this.providers.size();
+		for (AuthenticationProvider provider : getProviders()) {
+			if (!provider.supports(toTest)) {
+				continue;
+			}
+			if (logger.isTraceEnabled()) {
+				logger.trace(LogMessage.format("Authenticating request with %s (%d/%d)",
+						provider.getClass().getSimpleName(), ++currentPosition, size));
+			}
+			try {
+				result = provider.authenticate(authentication);
+				if (result != null) {
+					copyDetails(authentication, result);
+					break;
+				}
+			}
+			catch (AccountStatusException | InternalAuthenticationServiceException ex) {
+				prepareException(ex, authentication);
+				// SEC-546: Avoid polling additional providers if auth failure is due to
+				// invalid account status
+				throw ex;
+			}
+			catch (AuthenticationException ex) {
+				lastException = ex;
+			}
+		}
+		if (result == null && this.parent != null) {
+			// Allow the parent to try.
+			try {
+				parentResult = this.parent.authenticate(authentication);
+				result = parentResult;
+			}
+			catch (ProviderNotFoundException ex) {
+				// ignore as we will throw below if no other exception occurred prior to
+				// calling parent and the parent
+				// may throw ProviderNotFound even though a provider in the child already
+				// handled the request
+			}
+			catch (AuthenticationException ex) {
+				parentException = ex;
+				lastException = ex;
+			}
+		}
+		if (result != null) {
+			if (this.eraseCredentialsAfterAuthentication && (result instanceof CredentialsContainer)) {
+				// Authentication is complete. Remove credentials and other secret data
+				// from authentication
+				((CredentialsContainer) result).eraseCredentials();
+			}
+			// If the parent AuthenticationManager was attempted and successful then it
+			// will publish an AuthenticationSuccessEvent
+			// This check prevents a duplicate AuthenticationSuccessEvent if the parent
+			// AuthenticationManager already published it
+			if (parentResult == null) {
+				this.eventPublisher.publishAuthenticationSuccess(result);
+			}
+
+			return result;
+		}
+
+		// Parent was null, or didn't authenticate (or throw an exception).
+		if (lastException == null) {
+			lastException = new ProviderNotFoundException(this.messages.getMessage("ProviderManager.providerNotFound",
+					new Object[] { toTest.getName() }, "No AuthenticationProvider found for {0}"));
+		}
+		// If the parent AuthenticationManager was attempted and failed then it will
+		// publish an AbstractAuthenticationFailureEvent
+		// This check prevents a duplicate AbstractAuthenticationFailureEvent if the
+		// parent AuthenticationManager already published it
+		if (parentException == null) {
+			prepareException(lastException, authentication);
+		}
+		throw lastException;
+	}
+}
+
+
+```
+
+从源码可以看出，`ProviderManager` 继承了 `AuthenticationManager` 接口，重写了 `authenticate` 方法，`authentication`方法尝试对传入的Authentication对象进行认证，传入的Authentication是用户的提交的认证信息，比如用户名和密码，创建的一个Authentication对象。会依次询问各个AuthenticationProvider，当provider支持对传入的Authentication认证，便会尝试使用该provider进行认证。如果有多个provider都支持认证传入的Authentication对象，则只会使用第一个支持的provider进行认证。一旦有一个provider认证成功了，便会忽略之前任何provider抛出的异常，之后的provider也不会再继续认证的尝试。如果所有provider都认证失败，方法则会抛出最后一个provider抛出的异常。
+
+`AuthenticationProvider`：
+
+AuthenticationProvider也是一个接口，用来完成具体的认证逻辑（ProviderManager将认证的具体工作都交给了 `AuthenticationProvider`）。
+
+```java
+public interface AuthenticationProvider {
+    // 具体认证逻辑
+	Authentication authenticate(Authentication authentication) throws AuthenticationException;
+    // 判断是否支持传入的Authentication认证信息
+	boolean supports(Class<?> authentication);
+
+}
+```
+
+`AuthenticationProvider` 的实现类：
+
+![image-20240109144031337](typora文档图片/image-20240109144031337.png)
+
+不同的provider实现类对应不同的认证逻辑处理方式，例如`DaoAuthenticationProvider`就是验证账户密码，使用UserDetailsService作为一个DAO来查询用户名、密码以及用户的权限GrantedAuthority。它认证用户的方式就是简单的比较UsernamePasswordAuthenticationToken中由用户提交的密码和通过UserDetailsService查询获得的密码是否一致。
+
+源码：
+
+```java
+public class DaoAuthenticationProvider extends AbstractUserDetailsAuthenticationProvider {
+
+	private static final String USER_NOT_FOUND_PASSWORD = "userNotFoundPassword";
+
+	private PasswordEncoder passwordEncoder;
+
+	private volatile String userNotFoundEncodedPassword;
+
+	private UserDetailsService userDetailsService;
+
+	private UserDetailsPasswordService userDetailsPasswordService;
+
+	public DaoAuthenticationProvider() {
+		setPasswordEncoder(PasswordEncoderFactories.createDelegatingPasswordEncoder());
+	}
+    // 检查密码是否非空以及是否匹配
+	@Override
+	@SuppressWarnings("deprecation")
+	protected void additionalAuthenticationChecks(UserDetails userDetails,
+			UsernamePasswordAuthenticationToken authentication) throws AuthenticationException {
+		if (authentication.getCredentials() == null) {
+			this.logger.debug("Failed to authenticate since no credentials provided");
+			throw new BadCredentialsException(this.messages
+					.getMessage("AbstractUserDetailsAuthenticationProvider.badCredentials", "Bad credentials"));
+		}
+		String presentedPassword = authentication.getCredentials().toString();
+		if (!this.passwordEncoder.matches(presentedPassword, userDetails.getPassword())) {
+			this.logger.debug("Failed to authenticate since password does not match stored value");
+			throw new BadCredentialsException(this.messages
+					.getMessage("AbstractUserDetailsAuthenticationProvider.badCredentials", "Bad credentials"));
+		}
+	}
+
+}
+
+```
+
+`DaoAuthenticationProvider` 继承了抽象类 `AbstractUserDetailsAuthenticationProvider`：
+
+```java
+public abstract class AbstractUserDetailsAuthenticationProvider
+		implements AuthenticationProvider, InitializingBean, MessageSourceAware {
+		。。。。
+        @Override
+	public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+		Assert.isInstanceOf(UsernamePasswordAuthenticationToken.class, authentication,
+				() -> this.messages.getMessage("AbstractUserDetailsAuthenticationProvider.onlySupports",
+						"Only UsernamePasswordAuthenticationToken is supported"));
+        // 从传入的Authentication对象中获取用户名
+		String username = determineUsername(authentication);
+		boolean cacheWasUsed = true;
+        // 根据用户名，从缓存中获取用户的UserDetails
+		UserDetails user = this.userCache.getUserFromCache(username);
+		if (user == null) {
+			cacheWasUsed = false;
+			try {
+                // 如果从缓存中没有获取到用户，则通过方法retrieveUser来获取用户信息
+            // retrieve方法为一个抽象方法，不同的子类中有不同的实现，而在子类中，一般又会通过UserDetailService来获取用户信息，返回UserDetails
+				user = retrieveUser(username, (UsernamePasswordAuthenticationToken) authentication);
+			}
+			catch (UsernameNotFoundException ex) {
+				this.logger.debug("Failed to find user '" + username + "'");
+				if (!this.hideUserNotFoundExceptions) {
+					throw ex;
+				}
+				throw new BadCredentialsException(this.messages
+						.getMessage("AbstractUserDetailsAuthenticationProvider.badCredentials", "Bad credentials"));
+			}
+			Assert.notNull(user, "retrieveUser returned null - a violation of the interface contract");
+		}
+		try {
+			this.preAuthenticationChecks.check(user);
+            // additionalAuthenticationChecks为具体的认证逻辑，是一个抽象方法，在子类中实现。比如上面
+			additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken) authentication);
+		}
+		catch (AuthenticationException ex) {
+			if (!cacheWasUsed) {
+				throw ex;
+			}
+			// There was a problem, so try again after checking
+			// we're using latest data (i.e. not from the cache)
+			cacheWasUsed = false;
+			user = retrieveUser(username, (UsernamePasswordAuthenticationToken) authentication);
+			this.preAuthenticationChecks.check(user);
+			additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken) authentication);
+		}
+		this.postAuthenticationChecks.check(user);
+		if (!cacheWasUsed) {
+			this.userCache.putUserInCache(user);
+		}
+		Object principalToReturn = user;
+		if (this.forcePrincipalAsString) {
+			principalToReturn = user.getUsername();
+		}
+		return createSuccessAuthentication(principalToReturn, authentication, user);
+	}
+		。。。。。
+}
+```
 
 
 
@@ -2716,3 +3130,316 @@ HMACSHA256(base64UrlEncode(header) + "." + base64UrlEncode(claims), secret)
 JWT 头和有效载荷序列化的算法都用到了 Base64URL。该算法和常见 Base64 算 法类似，稍有差别。
 
 作为令牌的 JWT 可以放在 URL 中（例如 api.example/?token=xxx）。 Base64 中用的三个字符是"+"，"/"和"="，由于在 URL 中有特殊含义，因此 Base64URL 中对他们做了替换： "="去掉，"+"用"-"替换，"/"用"_"替换，这就是 Base64URL 算法。
+
+### 实现
+
+**思路分析**：
+
+1. 登录
+
+    自定义登录接口：调用 `ProviderManager` 的方法进行认证，如果认证通过生成jwt，把用户信息存入redis中。
+
+    自定义 `UserDetailsService`。在这个实现类中去查询数据库。
+
+2. 校验
+
+    定义Jwt认证过滤器；
+
+    获取token；
+
+    解析token获取其中的userid；
+
+    从redis中获取用户信息；
+
+    存入SecurityContextHolder；
+
+**代码实现**
+
+
+1. 配置文件
+
+    Spring Security 的核**心配置**就是继承 `WebSecurityConfigurerAdapter` 并注解 `@EnableWebSecurity` 的配置。这个配置指明了用户名密码的处理方式、请求路径、登录、登出控制等和安全相关的配置。
+
+    分三个：密码加密、configure、以及认证管理。
+
+    ```java
+    @Configuration
+    @EnableWebSecurity
+    public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    
+        @Bean
+        @Override
+        public AuthenticationManager authenticationManagerBean() throws Exception {
+            return super.authenticationManagerBean();
+        }
+    
+        @Bean
+        public PasswordEncoder passwordEncoder() {
+            return new BCryptPasswordEncoder();
+        }
+    
+        @Override
+        protected void configure(HttpSecurity http) throws Exception {
+            http.csrf().disable()
+                    .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                    .and()
+                    .authorizeRequests()
+                    .antMatchers("/login/login").permitAll()
+                    .anyRequest().authenticated();
+        }
+    }
+    ```
+
+2. 用户实体类
+
+    `User`：
+
+    ```java
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public class User {
+        @TableId(type = IdType.AUTO)
+        private String id;
+        private String username;
+        private String password;
+    }
+    ```
+
+3. 实现 `UserDetailsService`
+
+    `UserDetailsService` 即service层，调用mapper从数据库获取对应的用户和密码。
+
+    ```java
+    @Service
+    public class UserDetailsServiceImpl implements UserDetailsService {
+    
+        @Autowired
+        private UserMapper userMapper;
+    
+        @Override
+        public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+            QueryWrapper queryWrapper = new QueryWrapper();
+            queryWrapper.eq("username", username);
+            User user = userMapper.selectOne(queryWrapper);
+            if (user == null) {
+                throw new UsernameNotFoundException("用户找不到");
+            }
+            return new LoginUser(user);
+        }
+    }
+    ```
+
+    因为`UserDetailsService` 中方法的返回值是 `UserDetails`，所以需要定义类实现该接口，将获取到的用户信息类 User（包含账户、密码）封装到里面。
+
+    `LoginUser`：
+
+    ```java
+    public class LoginUser implements UserDetails {
+    
+        private User user;
+    
+        public User getUser() {
+            return user;
+        }
+    
+        public void setUser(User user) {
+            this.user = user;
+        }
+        // 手动实现的构造函数 封装User
+        public LoginUser(User user) {
+            this.user = user;
+        }
+    
+        /**
+         * 返回用户权限，可以从数据库取
+         * @return {@link Collection}<{@link ?} {@link extends} {@link GrantedAuthority}>
+         */
+        @Override
+        public Collection<? extends GrantedAuthority> getAuthorities() {
+            return null;
+        }
+    
+        @Override
+        public String getPassword() {
+            return user.getPassword();
+        }
+    
+        @Override
+        public String getUsername() {
+            return user.getUsername();
+        }
+    
+        public String getUserId() {
+            return user.getId();
+        }
+    
+    
+        @Override
+        public boolean isAccountNonExpired() {
+            return true;
+        }
+    
+        @Override
+        public boolean isAccountNonLocked() {
+            return true;
+        }
+    
+        @Override
+        public boolean isCredentialsNonExpired() {
+            return true;
+        }
+    
+        @Override
+        public boolean isEnabled() {
+            return true;
+        }
+    }
+    ```
+
+4. 登录接口
+
+    ```java
+    @RestController
+    @RequestMapping("login")
+    public class LoginController {
+    
+        @Autowired
+        private LoginService loginService;
+    
+        @PostMapping("login")
+        public Object login(@RequestBody User user) {
+            return loginService.login(user);
+        }
+    }
+    ```
+
+5. 自定义登陆逻辑类（service层）
+
+    ```java
+    public interface LoginService {
+    
+        Object login(User user);
+    }
+    ```
+
+    ```java
+    @Service
+    public class LoginServiceImpl implements LoginService {
+    
+        @Autowired
+        private AuthenticationManager authenticationManager;
+    
+        @Override
+        public Object login(User user) {
+            Authentication authentication = null;
+            UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(user.getUsername(), user.getPassword());
+            // authenticate该方法会去调用UserDetailsServiceImpl.loadUserByUsername方法
+    		// 在该方法中进行用户名的校验
+            authentication = authenticationManager.authenticate(authenticationToken);
+            if (Objects.isNull(authentication)) {
+                throw new RuntimeException("用户名或者密码错误");
+            }
+            LoginUser loginUser = (LoginUser) authentication.getPrincipal();
+            System.out.println(loginUser);
+            String userId = loginUser.getUserId();
+    		// 生成token返回前端
+            String token = JwtUtil.createJWT(userId);
+    
+            // 返回token，方便下次验证，可以用redis等存储
+            Map<String, String> map = new HashMap<>();
+            map.put("token", token);
+            return map;
+        }
+    }
+    ```
+
+6. 添加token认证过滤器
+
+    需要自定义一个类TokenAuthenticationFilter，继承SpringSecurity给我们提供的OncePerRequestFilter这个过滤器类，把他变成我们想要的过滤器，这个过滤器会去获取请求头中的token，对token进行解析取出其中的userid,使用userid去redis中获取对应的LoginUser对象。然后封装Authentication对象存入SecurityContextHolder。
+
+    ```java
+    package com.jwtsecurity.filter;
+    
+    import com.jwtsecurity.dao.UserMapper;
+    import com.jwtsecurity.pojo.LoginUser;
+    import com.jwtsecurity.pojo.User;
+    import com.jwtsecurity.utils.JwtUtil;
+    import com.sun.istack.internal.NotNull;
+    import io.jsonwebtoken.Claims;
+    import org.springframework.beans.factory.annotation.Autowired;
+    import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+    import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+    import org.springframework.security.core.context.SecurityContextHolder;
+    import org.springframework.stereotype.Component;
+    import org.springframework.util.StringUtils;
+    import org.springframework.web.filter.OncePerRequestFilter;
+    
+    import javax.servlet.FilterChain;
+    import javax.servlet.ServletException;
+    import javax.servlet.http.HttpServletRequest;
+    import javax.servlet.http.HttpServletResponse;
+    import java.io.IOException;
+    import java.util.Objects;
+    
+    @Component
+    public class TokenAuthenticationFilter extends OncePerRequestFilter {
+    
+        @Autowired
+        private UserMapper userMapper;
+    
+        @Override
+        // protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+            public void doFilterInternal(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull FilterChain filterChain) throws ServletException, IOException {
+            String token = request.getHeader("Authorization");
+            // System.out.println(token);
+            // 判断token是否存在，若不存在则为第一次登录，直接放行；
+            // 若存在则为第一次登录后的再次访问，需要进行token解析校验用户身份
+            if (!StringUtils.hasText(token)) {
+                // 放行
+                filterChain.doFilter(request, response);
+                return;
+            }
+            // 解析token
+            String userid;
+            try {
+                Claims claims = JwtUtil.parseJWT(token);
+                userid = claims.getSubject();
+            } catch (Exception e) {
+                e.printStackTrace();
+                throw new RuntimeException("token非法");
+            }
+            // 获取用户信息
+            User user = userMapper.selectById(Integer.parseInt(userid));
+            // 也可从redis中获取
+    
+            if(Objects.isNull(user)){
+                throw new RuntimeException("用户未登录");
+            }
+            // 获取权限信息封装到Authentication中
+            UsernamePasswordAuthenticationToken authenticationToken =
+                    new UsernamePasswordAuthenticationToken(new LoginUser(user),null,null);
+            // 存入SecurityContextHolder
+            SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+            // 放行
+            filterChain.doFilter(request, response);
+        }
+    }
+    ```
+
+    要把过滤器添加进配置，并且放到UsernamePasswordAuthenticationFilter前面，因为UsernamePasswordAuthenticationFilter过滤器是security过滤器链首位的，在他之前就要把用户状态存进SecurityContextHolder。
+
+    ```java
+    @Configuration
+    public class SecurityConfig extends WebSecurityConfigurerAdapter {
+        @Resource
+        private TokenAuthenticationFilter tokenAuthenticationFilter;
+        @Override
+        protected void configure(HttpSecurity http) throws Exception {
+            //此行要和上面配置文件中该方法中的内容写在一块，此处为了省略篇幅不都粘过来了
+            http.addFilterBefore(tokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        }
+    }
+    
+    ```
+

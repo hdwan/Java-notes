@@ -4,9 +4,9 @@
 
 ### Redis简介
 
-`Redis`，Remote Dictionary Server，远程字典服务，是一个使用 ANSI C 语言编写、支持网络、可基于内存亦可持久化的日志型、NoSQL 开源内存数据库。
+`Redis`，Remote Dictionary Server，远程字典服务，是一个使用 ANSI C 语言编写、支持网络、可**基于内存亦可持久化**的日志型、NoSQL 开源内存数据库。
 
-之所以称之为字典服务，是因为 Redis 是一个 `key-value` 存储系统。支持存储的 value 类型很多，包括 String(字符串)、List(链表)、Set(集合)、Zset(sorted set --有序集合)和 Hash（哈希类型）等。
+之所以称之为字典服务，是因为 Redis 是一个 **`key-value`** 存储系统。支持存储的 value 类型很多，包括 String(字符串)、List(链表)、Set(集合)、Zset(sorted set --有序集合)和 Hash（哈希类型）等。
 
 #### NoSQL
 
@@ -18,6 +18,8 @@ NoSQL（“non-relational”， “Not Only SQL”），泛指**非关系型的�
 - **列存储数据库**：关系型数据库是典型的行存储数据库。其存在的问题是，按行存储的数据在物理层面占用的是连续存储空间，不适合海量数据存储。而按列存储则可实现分布式存储，适合海量存储。典型代表是 HBase；
 - **文档型数据库**：其是 NoSQL 与关系型数据的结合，最像关系型数据库的 NoSQL。典型代表是 MongoDB；
 - **图形(Graph)数据库**：用于存放一个节点关系的数据库，例如描述不同人间的关系。典型代表是 Neo4J；
+
+![image-20240109165259771](typora文档图片/image-20240109165259771.png)
 
 #### 用途
 
@@ -31,22 +33,23 @@ Redis 在生产中使用最多的场景就是**做数据缓存**。即客户端�
 
 ### Redis 特性
 
-1. **性能极高**：Redis 读的速度可以达到 11w 次/s，写的速度可以达到 8w 次/s。高性能的原因：
-    - Redis 的所有操作都是在内存中发生的。
+1. **键值型**（key-value），支持多种数据结构。
+2. **性能极高**：Redis 读的速度可以达到 11w 次/s，写的速度可以达到 8w 次/s。高性能的原因：
+    - Redis 的所有操作都是在**内存中**发生的。
     - Redis 是用 C 语言开发的。
     - Redis 源码非常精细（集性能与优雅于一身）。
-2. **简单稳定**：Redis 源码很少。早期版本只有 2w 行左右。从 3.0 版本开始，增加了集群功能，代码变为了 5w 行左右。
-3. **持久化**：Redis 内存中的数据可以进行持久化，其有两种方式：RDB 与 AOF。
-4. **高可用集群**：Redis 提供了高可用的主从集群功能，可以确保系统的安全性。
-5. **丰富的数据类型**：Redis 是一个 key-value 存储系统。支持存储的 value 类型很多，包括 String(字符串)、List(链表)、Set(集合)、Zset(sorted set --有序集合)和 Hash（哈希类型） 等，还有 BitMap、HyperLogLog、Geospatial 类型。
-6. **BitMap**：一般用于大数据量的二值性统计。
-7. **HyperLogLog**：其是 Hyperlog Log，用于对数据量超级庞大的日志做去重统计。
-8. **Geospatial**：地理空间，其主要用于地理位置相关的计算。
-9. **强大的功能**：Redis 提供了数据过期功能、发布/订阅功能、简单事务功能，还支持 Lua 脚本扩展功能。
-10. **客户端语言广泛**：Redis提供了简单的 TCP 通信协议，编程语言可以方便地的接入 Redis。
-11. **支持 ACL 权限控制**：之前的权限控制非常笨拙。从 Redis6 开始引入了 ACL 模块，可以为不同用户定制不同的用户权限。
-    - ACL，Access Control List，访问控制列表，是一种细粒度的权限管理策略，可以针对任意用户与组进行权限控制。目前大多数 Unix 系统与 Linux 2.6 版本已经支持 ACL 了。 Zookeeper 早已支持 ACL 了。 Unix 与 Linux 系统默认使用是 UGO（User、Group、Other）权限控制策略，其是一种粗粒度的权限管理策略。
-12. **支持多线程 IO 模型**：Redis 之前版本采用的是单线程模型，从 6.0 版本开始支持了多线程模型。
+3. **简单稳定**：Redis 源码很少。早期版本只有 2w 行左右。从 3.0 版本开始，增加了集群功能，代码变为了 5w 行左右。
+4. **支持数据持久化**：Redis 内存中的数据可以进行持久化，其有两种方式：RDB 与 AOF。
+5. **高可用集群**：Redis 提供了高可用的主从集群功能，可以确保系统的安全性。也支持分片集群（数据拆分存储）。
+6. **丰富的数据类型**：Redis 是一个 key-value 存储系统。支持存储的 value 类型很多，包括 String(字符串)、List(链表)、Set(集合)、Zset(sorted set --有序集合)和 Hash（哈希类型） 等，还有 BitMap、HyperLogLog、Geospatial 类型。
+7. **BitMap**：一般用于大数据量的二值性统计。
+8. **HyperLogLog**：其是 Hyperlog Log，用于对数据量超级庞大的日志做去重统计。
+9. **Geospatial**：地理空间，其主要用于地理位置相关的计算。
+10. **强大的功能**：Redis 提供了数据过期功能、发布/订阅功能、简单事务功能，还支持 Lua 脚本扩展功能。
+11. **客户端语言广泛**：Redis提供了简单的 TCP 通信协议，编程语言可以方便地的接入 Redis。
+12. **支持 ACL 权限控制**：之前的权限控制非常笨拙。从 Redis6 开始引入了 ACL 模块，可以为不同用户定制不同的用户权限。
+     - ACL，Access Control List，访问控制列表，是一种细粒度的权限管理策略，可以针对任意用户与组进行权限控制。目前大多数 Unix 系统与 Linux 2.6 版本已经支持 ACL 了。 Zookeeper 早已支持 ACL 了。 Unix 与 Linux 系统默认使用是 UGO（User、Group、Other）权限控制策略，其是一种粗粒度的权限管理策略。
+13. **支持多线程 IO 模型**：Redis 之前版本采用的是单线程模型，从 6.0 版本开始支持了多线程模型，注意，6.0以后只有对网络请求的处理是多线程，核心还是单线程。
 
 ### Redis 的 IO 模型
 
@@ -126,9 +129,17 @@ redis-server
 
 默认安装位置是 `/usr/local/bin`。
 
+![image-20240109172138461](typora文档图片/image-20240109172138461.png)
+
+redis-cli：redis提供的命令行客户端。
+
+redis-server：redis的服务端启动脚本。
+
+redis-sentinel：redis的哨兵启动脚本。
+
 ### 后台启动
 
-1. 使用 nohub 命令：
+1. 使用 nohup 命令：
 
 ```shell
 nohup redis-server &
@@ -142,21 +153,122 @@ nohup redis-server &
 redis-cli shutdown
 ```
 
-2. 配置式后台启动
+2. **配置式**后台启动
 
-修改 Linux 中 Redis 的核心配置文件 `redis.conf` 达到后台启动的目的。**redis.conf 文件在 Redis 的安装目录根下。**
+修改 Linux 中 Redis 的核心配置文件 `redis.conf` 达到后台启动的目的。**redis.conf 文件在 Redis 的安装目录根下（压缩包的解压文件夹里面）。**
 
 **将 daemonize 属性值由 no 改为 yes，使 Redis 进程以守护进程方式运行。**
 
-修改后再启动 Redis，就无需再键入 nohup 与&符，但**必须要指定启动所使用的 Redis 配置文件**。
+
+
+**修改前先备份**：
+
+```shell
+cp redis.conf redis.conf.backups
+```
+
+**修改配置文件**：
+
+```shell
+vi redis.conf
+```
+
+主要修改部分：
+
+```shell
+# 监听的地址，默认是127.0.0.1，会导致只能本机访问，修改后任意ip都能访问，生产环境下不要设为0.0.0.0
+bind 0.0.0.0
+# 守护进程 修改为yes后即可后台运行
+daemonize yes
+# 密码，设置后访问redis需要密码
+requirepass xxxxx
+# 监听的端口 默认
+port 6379
+# 工作目录，默认是 . 即当前目录，也就是运行redis-server时的命令，日志、久化等文件会保存在这个目录dir 
+dir .
+# 数据库数量，设置为1，代表只使用1个库，默认有16个库，编号0~15
+databases 1
+# 设置redis能够使用的最大内存
+maxmemory 512mb
+# 日志文件，默认为空，不记录日志，可以指定日志文件名，放在上面的dir对应的位置
+logfile "redis.log"
+```
+
+**注意**：如果找不到可以 用 `/文件名` 搜索对应的行。
+
+修改后再启动 Redis，就无需再键入 nohup 与&符，但**必须要指定启动所使用的 Redis 配置文件**，即：
+
+```shell
+redis-server redis.conf
+```
 
 原因：使用 `nohup redis-server &` 命令启动 Redis 时，启动项中已经设置好了 Redis 各个参数的默认值，Redis 会按照这些设置的参数进行启动。
 
 但这些参数是可以在配置文件中进行修改的，修改后，需要在启动命令中指定要加载的配置文件，这样，配置文件中的参数值将覆盖原默认值。 
 
+此时启动不会输出任何信息，可以通过查看进程判断是否启动成功：
+
 ```shell
-redis-server redis.conf
+ps -ef | grep redis
 ```
+
+**停止运行**
+
+直接用 kill 根据进程号杀死redis进程：
+
+```shell
+kill -9 进程号
+```
+
+### 开机自启动
+
+1. 新建配置文件
+
+    ```shell
+    vi /etc/systemd/system/redis.service
+    ```
+
+    内容如下:
+
+    ```conf
+    [Unit]
+    Description=redis-server
+    After=network.target
+    
+    [Service]
+    Type=forking
+    ExecStart=/usr/local/bin/redis-server /root/package/redis-7.2.3/redis.conf
+    PrivateTmp=true
+    
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+2. 重载系统服务
+
+    ```sh
+    systemctl daemon-reload
+    ```
+
+3. 操作redis
+
+    ```sh
+    # 启动
+    systemctl start redis
+    # 停止
+    systemctl stop redis
+    # 重启
+    systemctl restart redis
+    # 查看状态
+    systemctl status redis
+    ```
+4. 设置开机自启
+
+   ```sh
+   systemctl enable redis
+   ```
+   
+    
 
 ## 连接
 
@@ -164,9 +276,9 @@ Redis 是一个内存数据库服务器，就像 MySQL 一样，对其操作也�
 
 **绑定客户端IP**
 
-Redis 可以通过修改配置文件来**限定可以访问自己的客户端 IP**。如只允许当前主机访问：
+Redis 可以通过修改配置文件来**限定可以访问自己的客户端 IP**。如**只允许当前主机访问**：
 
-```
+```shell
 bind 127.0.0.1 -::1
 ```
 
@@ -176,7 +288,7 @@ bind 127.0.0.1 -::1
 
 默认**保护模式**是开启的，**只允许本机的客户端访问**，即只允许自己访问自己。一般都要关闭，使得其它客户端可以连接 Redis。
 
-```
+```shell
 protected-mode no
 ```
 
@@ -207,15 +319,35 @@ Redis 可以通过修改配置文件来禁止使用这些命令，或重命名�
 
 ![image-20231223144307572](typora文档图片/image-20231223144307572.png)
 
-## Redis客户端
+## Redis 客户端
 
 Redis 客户端也像 MySQL 客户端一样有多种类型：命令行客户端、图形界面客户端、Java 代码客户端。
 
 ### 命令行客户端
 
-Redis 提供了基本的命令行客户端。打开命令行客户端的命令为 `redis-cli`：
+Redis 默认提供基本的命令行客户端。打开命令行客户端的命令为 `redis-cli`：
+
+```shell
+redis-cli [options] [commonds]
+```
+
+其中，常见的`options`有：
+
+- `-h 127.0.0.1`：指定要连接的redis节点的IP地址，默认是127.0.0.1。
+- `-p 6379`：指定要连接的端口，默认6379。
+- `-a xxxxx`：指定访问密码。
+
+`commonds` 是redis的操作命令，如：
+
+- `ping`，与redis服务端做心跳测试，服务端正常会返回 `pong`。
+
+示例：
 
 ![image-20231223152215955](typora文档图片/image-20231223152215955.png)
+
+```shell
+redis-cli -h 127.0.0.1 -p 6379 -a xxxxxx
+```
 
 -h：指定要连接的 Redis 服务器的 IP。 
 
@@ -223,15 +355,23 @@ Redis 提供了基本的命令行客户端。打开命令行客户端的命令�
 
 若连接的是本机 Redis，且端口号没有改变，保持默认的 6379，则-h 与-p 选项可以省略不写。
 
+不指定`commonds`的时候，会进入 `redis-cli` 的交互控制台，即上面的 `127.0.0.1:6379>`。
+
+注意：如果设置了密码的话，必须要使用 `-a` 输入密码，不然没有权限。
+
 ### 图形界面客户端
 
-RedisPlus， https://gitee.com/MaxBill/RedisPlus。
+RDM
+
+下载安装包后安装（安装包在群里）。
+
+连接：
+
+![image-20240109220739143](typora文档图片/image-20240109220739143.png)
 
 ### Java 代码客户端
 
 所谓 Java 代码客户端就是一套操作 Redis 的 API，其作用就像 JDBC 一样，所以 Java 代码客户端其实就是一个或多个 Jar 包，提供了对 Redis 的操作接口。 对 Redis 操作的 API 很多，例如 jdbc-redis、jredis 等，但最常用的是 Jedis。
 
-## Redis 配置文件
 
-redis.conf
 
