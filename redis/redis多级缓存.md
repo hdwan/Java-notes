@@ -18,13 +18,13 @@
 
 多级缓存就是充分利用请求处理的每个环节，分别添加缓存，减轻Tomcat压力，提升服务性能：
 
-- 浏览器访问静态资源时，优先读取浏览器本地缓存；
-- 访问非静态资源（ajax查询数据）时，访问服务端；
-- 请求到达Nginx后，优先读取Nginx本地缓存；
-- 如果Nginx本地缓存未命中，则去直接查询Redis（不经过Tomcat）；
+- 浏览器访问静态资源时，**优先读取浏览器本地缓存**；
+- 访问非静态资源（ajax查询数据）时，**访问服务端**；
+- 请求到达Nginx后，**优先读取Nginx本地缓存**；
+- 如果Nginx本地缓存未命中，则去直接**查询Redis**（不经过Tomcat）；
 - 如果Redis查询未命中，则查询Tomcat；
-- 请求进入Tomcat后，优先查询JVM进程缓存；
-- 如果JVM进程缓存未命中，则查询数据库；
+- 请求进入Tomcat后，优先**查询JVM进程缓存**；
+- 如果JVM进程缓存未命中，则**查询数据库**；
 
 ![image-20210821075558137](typora文档图片/image-20210821075558137.png)
 
@@ -48,23 +48,15 @@
 
 可见，多级缓存的关键有两个：
 
-- 一个是在nginx中编写业务，实现nginx本地缓存、Redis、Tomcat的查询
+- 一个是在nginx中编写业务，实现nginx本地缓存、Redis、Tomcat的查询；
 
-- 另一个就是在Tomcat中实现JVM进程缓存
+- 另一个就是在Tomcat中实现JVM进程缓存；
 
 其中Nginx编程则会用到OpenResty框架结合Lua这样的语言。
 
 ## JVM进程缓存
 
 为了演示多级缓存的案例，我们先准备一个商品查询的业务。
-
-### 导入案例
-
-参考课前资料的：《案例导入说明.md》
-
-![image-20210821081418456](typora文档图片/image-20210821081418456.png) 
-
-
 
 ### 初识Caffeine
 
@@ -154,7 +146,6 @@ Caffeine提供了三种缓存驱逐策略：
 
 利用Caffeine实现下列需求：
 
-- 给根据id查询商品的业务添加缓存，缓存未命中时查询数据库
 - 给根据id查询商品库存的业务添加缓存，缓存未命中时查询数据库
 - 缓存初始大小为100
 - 缓存上限为10000
@@ -163,18 +154,9 @@ Caffeine提供了三种缓存驱逐策略：
 
 首先，我们需要定义两个Caffeine的缓存对象，分别保存商品、库存的缓存数据。
 
-在item-service的`com.heima.item.config`包下定义`CaffeineConfig`类：
+定义`CaffeineConfig`类：
 
 ```java
-package com.heima.item.config;
-
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.heima.item.pojo.Item;
-import com.heima.item.pojo.ItemStock;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
 @Configuration
 public class CaffeineConfig {
 
@@ -196,9 +178,9 @@ public class CaffeineConfig {
 }
 ```
 
+然后，修改ItemController类，添加缓存逻辑：
 
-
-然后，修改item-service中的`com.heima.item.web`包下的ItemController类，添加缓存逻辑：
+先从jvm缓存读，读不到再通过方法体从具体逻辑（读数据库）里找。
 
 ```java
 @RestController
@@ -232,10 +214,6 @@ public class ItemController {
 }
 ```
 
-
-
-
-
 ## Lua语法入门
 
 Nginx编程需要用到Lua语言，因此我们必须先入门Lua的基本语法。
@@ -268,8 +246,6 @@ CentOS7默认已经安装了Lua语言环境，所以可以直接运行Lua代码�
 print("Hello World!")  
 ```
 
-
-
 3）运行
 
 ![image-20210821091638140](typora文档图片/image-20210821091638140.png)
@@ -286,7 +262,7 @@ Lua中支持的常见数据类型包括：
 
 ![image-20210821091835406](typora文档图片/image-20210821091835406.png)
 
-另外，Lua提供了type()函数来判断一个变量的数据类型：
+另外，Lua提供了`type()`函数来判断一个变量的数据类型：
 
 ![image-20210821091904332](typora文档图片/image-20210821091904332.png)
 
@@ -316,14 +292,14 @@ local arr = {'java', 'python', 'lua'}
 local map =  {name='Jack', age=21}
 ```
 
-Lua中的数组角标是从1开始，访问的时候与Java中类似：
+Lua中的**数组角标是从1开始**，访问的时候与Java中类似：
 
 ```lua
 -- 访问数组，lua数组的角标从1开始
 print(arr[1])
 ```
 
-Lua中的table可以用key来访问：
+Lua中的**table可以用key来访问**：`table.key`
 
 ```lua
 -- 访问table
@@ -358,10 +334,6 @@ for key,value in pairs(map) do
    print(key, value) 
 end
 ```
-
-
-
-
 
 
 
@@ -410,19 +382,13 @@ end
 
 
 
-与java不同，布尔表达式中的逻辑运算是基于英文单词：
+与java不同，**布尔表达式中的逻辑运算是基于英文单词**：
 
 ![image-20210821092657918](typora文档图片/image-20210821092657918.png)
-
-
-
-
 
 #### 案例
 
 需求：自定义一个函数，可以打印table，当参数为nil时，打印错误信息
-
-
 
 ```lua
 function printArr(arr)
@@ -1457,7 +1423,7 @@ ngx.say(cjson.encode(item))
 
 大多数情况下，浏览器查询到的都是缓存数据，如果缓存数据与数据库数据存在较大差异，可能会产生比较严重的后果。
 
-所以我们必须保证数据库数据、缓存数据的一致性，这就是缓存与数据库的同步。
+所以我们必须**保证数据库数据、缓存数据的一致性**，这就是缓存与数据库的同步。
 
 ### 数据同步策略
 

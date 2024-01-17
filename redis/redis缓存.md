@@ -72,7 +72,7 @@ dir ./
 
 ### RDB原理
 
-bgsave开始时会fork主进程得到子进程，子进程共享主进程的内存数据。完成fork后读取内存数据并写入 RDB 文件。
+bgsave开始时会**fork主进程得到子进程**，子进程**共享**主进程的内存数据。完成fork后读取内存数据并写入 RDB 文件。
 
 fork采用的是copy-on-write技术：
 
@@ -120,7 +120,7 @@ appendfilename "appendonly.aof"
 
 
 
-AOF的命令记录的频率也可以通过redis.conf文件来配：
+AOF的命令**记录的频率**也可以通过redis.conf文件来配：
 
 ```properties
 # 表示每执行一次写命令，立即记录到AOF文件
@@ -141,7 +141,7 @@ appendfsync no
 
 #### AOF文件重写
 
-因为是记录命令，AOF文件会比RDB文件大的多。而且AOF会记录对同一个key的多次写操作，但只有最后一次写操作才有意义。通过执行bgrewriteaof命令，可以让AOF文件执行重写功能，用最少的命令达到相同效果。
+因为是记录命令，AOF文件会比RDB文件大的多。而且AOF会记录对同一个key的多次写操作，但只有最后一次写操作才有意义。通过执行`bgrewriteaof`命令，可以让AOF文件执行重写功能，用最少的命令达到相同效果。
 
 ![image-20210725151729118](typora文档图片/image-20210725151729118.png)
 
@@ -382,7 +382,7 @@ info replication
 
 
 
-master如何得知salve是第一次来连接呢？？
+**master如何得知salve是第一次来连接呢？**
 
 有几个概念，可以作为判断依据：
 
@@ -480,7 +480,7 @@ slave与master的offset之间的差异，就是salve需要增量拷贝的数据�
 
 主从同步可以保证主从数据的一致性，非常重要。
 
-可以从以下几个方面来优化Redis主从就集群：
+可以从以下几个方面来**优化Redis主从集群**：
 
 - 在master中配置repl-diskless-sync yes启用无磁盘复制，避免全量同步时的磁盘IO。
 - Redis单节点上的内存占用不要太大，减少RDB导致的过多磁盘IO
@@ -651,9 +651,9 @@ redis-sentinel s3/sentinel.conf
 
 哨兵的作用如下：
 
-- **监控**：Sentinel 会不断检查您的master和slave是否按预期工作
-- **自动故障恢复**：如果master故障，Sentinel会将一个slave提升为master。当故障实例恢复后也以新的master为主
-- **通知**：Sentinel充当Redis客户端的服务发现来源，当集群发生故障转移时，会将最新信息推送给Redis的客户端
+- **监控**：Sentinel 会不断检查您的master和slave是否按预期工作；
+- **自动故障恢复**：如果master故障，Sentinel会将一个slave提升为master。当故障实例恢复后也以新的master为主；
+- **通知**：Sentinel充当Redis客户端的服务发现来源，当集群发生故障转移时，会将最新信息推送给Redis的客户端；
 
 
 
@@ -663,7 +663,7 @@ Sentinel基于心跳机制监测服务状态，每隔1秒向集群的每个实�
 
 •主观下线：如果某sentinel节点发现某实例未在规定时间响应，则认为该实例**主观下线**。
 
-•客观下线：若超过指定数量（quorum）的sentinel都认为该实例主观下线，则该实例**客观下线**。quorum值最好超过Sentinel实例数量的一半。
+•客观下线：若超过指定数量（quorum）的sentinel都认为该实例主观下线，则该实例**客观下线**。`quorum值最好超过Sentinel实例数量的一半。`
 
 ![image-20210725154632354](typora文档图片/image-20210725154632354.png)
 
@@ -673,10 +673,10 @@ Sentinel基于心跳机制监测服务状态，每隔1秒向集群的每个实�
 
 一旦发现master故障，sentinel需要在salve中选择一个作为新的master，选择依据是这样的：
 
-- 首先会判断slave节点与master节点断开时间长短，如果超过指定值（down-after-milliseconds * 10）则会排除该slave节点
-- 然后判断slave节点的slave-priority值，越小优先级越高，如果是0则永不参与选举
-- 如果slave-prority一样，则判断slave节点的offset值，越大说明数据越新，优先级越高
-- 最后是判断slave节点的运行id大小，越小优先级越高。
+- 首先会**判断slave节点与master节点断开时间长短**，如果超过指定值（down-after-milliseconds * 10）则会排除该slave节点；
+- 然后**判断slave节点的slave-priority值**，**越小优先级越高**，如果**是0则永不参与选举**；
+- 如果slave-prority一样，则**判断slave节点的offset值**，**越大**说明数据越新，**优先级越高**；
+- 最后是判断slave节点的**运行id大小**，**越小优先级越高**。
 
 
 
@@ -696,14 +696,14 @@ Sentinel基于心跳机制监测服务状态，每隔1秒向集群的每个实�
 
 Sentinel的三个作用是什么？
 
-- 监控
-- 故障转移
-- 通知
+- 监控；
+- 故障转移；
+- 通知；
 
 Sentinel如何判断一个redis实例是否健康？
 
-- 每隔1秒发送一次ping命令，如果超过一定时间没有相向则认为是主观下线
-- 如果大多数sentinel都认为实例主观下线，则判定服务下线
+- `每隔1秒发送一次ping命令`，如果超过一定时间没有相向则认为是主观下线；
+- 如果大多数sentinel都认为实例主观下线，则判定服务下线；
 
 故障转移步骤有哪些？
 
@@ -775,9 +775,9 @@ public LettuceClientConfigurationBuilderCustomizer clientConfigurationBuilderCus
 
 主从和哨兵可以解决高可用、高并发读的问题。但是依然有两个问题没有解决：
 
-- 海量数据存储问题
+- 海量数据存储问题；
 
-- 高并发写的问题
+- 高并发写的问题；
 
 使用分片集群可以解决上述问题，如图:
 
@@ -787,13 +787,13 @@ public LettuceClientConfigurationBuilderCustomizer clientConfigurationBuilderCus
 
 分片集群特征：
 
-- 集群中有多个master，每个master保存不同数据
+- 集群中有多个master，每个master保存不同数据；
 
-- 每个master都可以有多个slave节点
+- 每个master都可以有多个slave节点；
 
-- master之间通过ping监测彼此健康状态
+- master之间通过ping监测彼此健康状态；
 
-- 客户端请求可以访问集群任意节点，最终都会被转发到正确节点
+- 客户端请求可以访问集群任意节点，最终都会被转发到正确节点；
 
 #### 集群结构
 
@@ -1051,11 +1051,9 @@ redis-cli --cluster提供了很多操作集群的命令，可以通过下面方�
 
 ![image-20210725160138290](typora文档图片/image-20210725160138290.png)
 
-比如，添加节点的命令：
+比如，**添加节点**的命令：
 
 ![image-20210725160448139](typora文档图片/image-20210725160448139.png)
-
-
 
 #### 需求分析
 
@@ -1236,7 +1234,7 @@ redis-cli -p 7002 shutdown
 
 ![image-20210725162319490](typora文档图片/image-20210725162319490.png)
 
-3）最后是确定下线，自动提升一个slave为新的master：
+3）最后是确定下线，**自动提升一个slave为新的master**：
 
 ![image-20210725162408979](typora文档图片/image-20210725162408979.png)
 
